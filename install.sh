@@ -41,7 +41,8 @@ command -v ss >/dev/null || apt-get install -y -qq iproute2 >/dev/null
 # -- what is already there: decided before anything changes ----------------------------------------
 
 # The program listening on a TCP port, or nothing.
-listener() { ss -ltnp "sport = :$1" 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | sed 's/users:(("//'; }
+# (A free port matches nothing, which mustn't stop the script.)
+listener() { { ss -ltnp "sport = :$1" 2>/dev/null || true; } | { grep -o 'users:(("[^"]*' || true; } | head -1 | sed 's/users:(("//'; }
 
 say "Looking at what the server already runs"
 WEB="$(listener 80)"
