@@ -25,6 +25,7 @@ import json
 
 from PIL import Image
 
+import camera as C
 import voxels as V
 
 SIZE = 96
@@ -64,8 +65,10 @@ def part_id(layer):
 
 
 def lamp_role(layer):
-    """A lamp layer's role by its name: headlight, turn signal or tail light."""
+    """A lamp layer's role by its name: searchlight, headlight, turn signal or tail light."""
     name = layer["name"].lower()
+    if "search" in name or "spot" in name:
+        return "search"
     if "tail" in name or "brake" in name or "rear" in name:
         return "tail"
     if "signal" in name or "indicator" in name or "blinker" in name:
@@ -159,9 +162,9 @@ class Scene:
         g = gen.module
         self.g = g
         self.view = view
-        self.buf, glass = g.render(g.Model(vox), view)
+        self.buf, glass = C.render(gen, view, g.Model(vox))
         col = g.shade(self.buf)
-        ox, oy = SIZE // 2, SIZE // 2 + gen.dy[view]
+        ox, oy = SIZE // 2, SIZE // 2 + C.dy(gen, view)
         self.px = {}
         # Per pixel, the solid voxel in front and the glass in front of that, apart: (colour, layer,
         # depth) each.
@@ -297,14 +300,13 @@ class Riders:
     over them."""
 
     def __init__(self, gen, seats, view):
-        g = gen.module
-        dy = gen.dy[view]
-        hip = getattr(g, "RIDER_HIP_ROW", {"S": 19, "N": 20, "E": 18, "W": 18})
+        dy = C.dy(gen, view)
+        hip = C.hip(gen, view)
         self.rects = []
         for seat in seats:
-            sx, sy = g.project(view, seat["f"], seat["r"], seat["z"])
-            depth = g.to_world(view, seat["f"], seat["r"])[1] * g.DEPTH_SCALE[view]
-            cx, cy = sx + SIZE // 2, sy + SIZE // 2 + dy - (hip[view] - 16)
+            sx, sy = C.project(gen, view, seat["f"], seat["r"], seat["z"])
+            depth = C.depth(gen, view, seat["f"], seat["r"])
+            cx, cy = sx + SIZE // 2, sy + SIZE // 2 + dy - (hip - 16)
             self.rects.append((depth, cx - 8, cx + 8, cy - 16, cy + 15))
         self.seats = {seat["id"]: rect for seat, rect in zip(seats, self.rects)}
 
@@ -417,9 +419,9 @@ def lit_layer(gen, vox, owner, lamp, kind, view):
             lit_keys.add(k)
     if not lit_keys:
         return {}
-    buf, _ = g.render(g.Model(scene_vox), view)
+    buf, _ = C.render(gen, view, g.Model(scene_vox))
     col = g.shade(buf)
-    ox, oy = SIZE // 2, SIZE // 2 + gen.dy[view]
+    ox, oy = SIZE // 2, SIZE // 2 + C.dy(gen, view)
     glow_of = g.LIGHT_GLOW
     spill_of = g.LIGHT_SPILL
     lit = {(x + ox, y + oy): (col[(x, y)], e[1]) for (x, y), e in buf.items() if e[2] == "lights" and e[1] in glow_of}
@@ -500,8 +502,10 @@ def render_states(gen, project, seats=None):
 
     wheel_parts = set(getattr(g, "WHEEL_PARTS", {"wheel"})) | {layers[n].get("role") or f"L{n}" for n in wheel_layers}
 
+    cam = C.resolve(project, box)
     with V.styled(gen, project, box):
-        for view in DIRS:
+        # A vehicle that looks the same whichever way it faces is drawn once, for all four.
+        for view in DIRS[:1] if cam.one else DIRS:
             riders = Riders(gen, seats, view)
             vox, owner, per_layer = build(gen, project, box, view)
             closed = Scene(gen, vox, owner, view)
@@ -671,7 +675,8 @@ def render_states(gen, project, seats=None):
                 add(f"{pid}_overlay_1", view, [bo])
                 add(f"{pid}_outline", view, [g.outline(set(mine))])
                 kind = lamp_role(layers[n])
-                if kind == "head":
+                if kind in ("head", "search"):
+                    # A searchlight's lit lens isn't drawn in game (its beam is), but says where it is.
                     add(f"{pid}_on", view, [lit_layer(gen, vox, owner, n, "head", view)])
                 elif kind == "tail":
                     add(f"{pid}_on", view, [lit_layer(gen, vox, owner, n, "tail", view)])
@@ -819,6 +824,13 @@ def render_states(gen, project, seats=None):
                             255 if a >= g.PAINT_MIN_ALPHA else a)
             add("wreck", view, [burnt])
 
+    if cam.one:
+        for st in states.values():
+            st["frames"] = {v: st["frames"][DIRS[0]] for v in DIRS}
+    if cam.mode == "sprite":
+        import sprite as S
+        S.recolour(states, project, ids, role, g, MASK_ALPHA)
+
     # A wheel kit on road tyres looks the same here: the tool draws one tyre.
     for k in kits:
         if not wheel_kit(layers[k]):
@@ -829,6 +841,11 @@ def render_states(gen, project, seats=None):
                            "closing_0", "closing_overlay_0"):
                 if f"{pid}_{suffix}" in states:
                     states[f"{prefix}{pid}_{suffix}"] = states[f"{pid}_{suffix}"]
+
+    # The game's vehicle parts start on the jeep's hood mask, looked up in this sprite when they move
+    # over to it: a vehicle without a hood still has the state, empty.
+    if "click_hood_closed" not in states:
+        states["click_hood_closed"] = {"frames": {v: [{}] for v in DIRS}, "delay": None}
 
     for name in ("PRIMARY", "ATTACH", "WHEEL"):
         states[name] = {"frames": {"S": [{}]}, "delay": None, "single": True}
@@ -871,7 +888,7 @@ def overflow_text(over):
 
 # A panel's states while swung open or swinging (a tailgate dropped behind the vehicle): these may
 # run off the frame, which only cuts the panel off at the edge.
-SWUNG = re.compile(r"_(open|opening|closing)(_overlay)?$")
+SWUNG = re.compile(r"_(open|opening|closing)(_overlay)?(_\d+)?$")
 
 
 def check_canvas(states):

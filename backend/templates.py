@@ -46,11 +46,8 @@ MATERIALS = [
     "white_flat", "red_flat", "red_line_flat", "rust", "glass",
 ]
 
-# Every template keeps inside these, so its sprites fit the game's 96 pixel canvas in every
-# direction (the side views stretch the length by 1.25, the front and back views add the length to
-# the height).
-
-# Each template's own box: length, width, height.
+# Each template's own box: length, width, height, small enough that its sprites fit the game's 96
+# pixel canvas in every direction.
 BOXES = {"car": (70, 38, 26), "pickup": (72, 42, 32), "van": (74, 42, 34), "jeep-like": (68, 40, 32)}
 
 

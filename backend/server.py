@@ -208,10 +208,10 @@ class Server:
         started = time.time()
         b = V.Box.from_dict(box)
         dirs = list(self.gen.module.DIRS)
-        models, owners, _, count = V.build(project, b, materials or self.gen.materials, dirs, gen=self.gen)
-        carved = time.time()
         images, parts, keys = {}, {}, {}
         with V.styled(self.gen, project, b):
+            models, owners, _, count = V.build(project, b, materials or self.gen.materials, dirs, gen=self.gen)
+            carved = time.time()
             for view in dirs:
                 key = V.blank_keys()
                 img, part = V.render_sprite(self.gen, view, models[view], owners[view], self.colours(paint), keys=key)
@@ -232,9 +232,9 @@ class Server:
         """The frames of a layer swinging open, seen from one direction, at the generator's own angles
         for its kind; played backwards to shut."""
         b = V.Box.from_dict(box)
-        scenes = V.swing_scenes(self.gen, project, b, materials or self.gen.materials, layer, view)
         frames = []
         with V.styled(self.gen, project, b):
+            scenes = V.swing_scenes(self.gen, project, b, materials or self.gen.materials, layer, view)
             for vox, owner in scenes:
                 img, _ = V.render_sprite(self.gen, view, vox, owner, self.colours(paint))
                 frames.append(V.png_data_url(img))
@@ -257,6 +257,11 @@ class Server:
         data = {"box": box, "materials": materials or self.gen.materials, "layers": project["layers"]}
         P.reshape(data, size, mode, self.gen)
         return {"box": data["box"], "layers": data["layers"]}
+
+    def rpc_camera_defaults(self):
+        """The custom camera that draws most like the generator, per direction (camera.default_dirs)."""
+        import camera
+        return {"dirs": camera.default_dirs(self.gen.module)}
 
     def rpc_damage_types(self):
         repo = self.repo()
@@ -356,6 +361,14 @@ class Server:
         P.remap(p, self.gen.materials)
         return {"box": p["box"], "layers": p["layers"], "materials": self.gen.materials, "vehicle": p.get("vehicle"),
                 "customMaterials": p.get("customMaterials") or []}
+
+    def rpc_import_sprite(self, files, nose="N", name="vehicle"):
+        """A new project from a finished sprite, an Aseprite file or PNGs (sprite.build): each layer
+        named for the part it is, one top-down picture for all four directions."""
+        import sprite as S
+        p, warnings = S.build(files, nose, name, self.gen.materials)
+        return {"box": p["box"], "layers": p["layers"], "materials": self.gen.materials, "vehicle": p["vehicle"],
+                "sprite": p["sprite"], "refs": p["refs"], "customMaterials": [], "warnings": warnings}
 
     def rpc_wheels(self, box, axles, radius, track, width=5, materials=None):
         """A wheel layer built from axle places, radius, track and tyre width (templates.wheels)."""

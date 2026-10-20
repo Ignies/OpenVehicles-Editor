@@ -10,6 +10,9 @@ Content.CMU/Resources/Textures/CMU14/Structures/vehicles/jeep/
 Content.CMU/Shared/Vehicle/Open/CMUVehiclePaintComponent.cs
 Content.CMU/Shared/Vehicle/Open/CMUVehicleDamageStatesComponent.cs
 
+# The jeep field manual's text, which a vehicle's own manual is written from.
+Content.CMU/Resources/Locale/en-US/CMU14/vehicle/jeep-manual.ftl
+
 # The damage types a part's damage states can take.
 Resources/Prototypes/Damage/
 

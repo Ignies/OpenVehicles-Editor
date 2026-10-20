@@ -198,11 +198,21 @@ async def shutdown(_app):
         await s.stop()
 
 
+@web.middleware
+async def revalidate(request, handler):
+    """The app's own files are checked with the server on every load (cheap: an unchanged file comes
+    back 304), so a page never runs one script from before an update with another from after it."""
+    response = await handler(request)
+    if not request.path.startswith(("/audio/", "/download/")) and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 def make_app():
     if not os.path.isfile(GENERATOR):
         sys.exit(f"No generator at {GENERATOR}: run tools/snapshot.py, or set CMUOV_GAMEDATA / CMUOV_GENERATOR.")
     os.makedirs(WORK, exist_ok=True)
-    app = web.Application(client_max_size=MAX_MESSAGE)
+    app = web.Application(client_max_size=MAX_MESSAGE, middlewares=[revalidate])
     app.router.add_get("/", index)
     app.router.add_get("/ws", socket)
     app.router.add_get("/healthz", health)

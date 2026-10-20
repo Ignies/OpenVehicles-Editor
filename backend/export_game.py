@@ -35,11 +35,26 @@ import re
 
 from PIL import Image
 
+import camera as C
 import export as X
+import manual as M
 import voxels as V
 
 SEAT_NAMES = {"driver": "cmu-vehicle-seat-driver", "passenger": "cmu-vehicle-seat-passenger"}
-LAMP_ITEMS = {"head": "CMUJeepHeadlight", "signal": "CMUJeepTurnSignal", "tail": "CMUJeepTailLight"}
+LAMP_ITEMS = {"head": "CMUJeepHeadlight", "signal": "CMUJeepTurnSignal", "tail": "CMUJeepTailLight",
+              "search": "CMUJeepSearchlight"}
+# How likely each kind of lamp is to take some of a hit on the vehicle, and how much of it: the jeep's.
+LAMP_HITS = {"head": (0.3, 0.5), "signal": (0.25, 0.4), "tail": (0.25, 0.4), "search": (0.15, 0.5)}
+# A hinged panel comes off and goes back on as the jeep's do, in a slot that starts with the jeep's
+# part of its kind: hood, door, or a lid at the back (tailgate, boot lid, rear hatch).
+PANEL_ITEMS = {"hood": "CMUJeepHood", "door": "CMUJeepDoor", "tailgate": "CMUJeepTailgate",
+               "boot": "CMUJeepTailgate", "hatch": "CMUJeepTailgate"}
+# What a wreck throws about when it goes up: the jeep's burnt wheel and engine, and its windshield
+# frame and headlamp when it had them.
+DEBRIS = {"wheel": "CMUJeepDebrisWheel", "windshield": "CMUJeepDebrisWindshield",
+          "headlight": "CMUJeepDebrisHeadlight", "engine": "CMUJeepDebrisEngine"}
+# What its kit crate costs on the cargo catalog, unless the vehicle says (vehicle.cost).
+DEFAULT_COST = 15000
 DIRECTION = {"S": "South", "N": "North", "E": "East", "W": "West"}
 INTERIOR_MATS = {"od_in", "od_in_flat"}
 # Voxels to a tile, as the game places click masks and seats.
@@ -86,6 +101,7 @@ DEFAULT_SOUNDS = {
     "lid": "/Audio/CMU14/Jeep/jeep_hood_open.wav",
     "lidClose": "/Audio/CMU14/Jeep/jeep_hood_close.wav",
     "windshield": "/Audio/CMU14/Jeep/jeep_windshield.wav",
+    "off": "/Audio/CMU14/Jeep/jeep_engine_off.wav",
 }
 # What every open vehicle drives like (CMUOpenVehicleBase): top speed and acceleration (tiles a
 # second), hull integrity, fuel tank and the fuel it starts with, and the hull damage of smashing
@@ -138,6 +154,7 @@ def driving(sounds):
         + engine("roughDriveSound", "roughDrive", {"volume": -1, "maxDistance": 12})
         + engine("revSound", "rev", {"maxDistance": 12})
         + engine("stallSound", "stall", {"maxDistance": 12})
+        + engine("offSound", "off", {"maxDistance": 12})
         + "  - type: CMUVehicleCrashKnockout\n" + engine("hornSound", "hornLong", {"volume": 2})
         + f"""  - type: VehicleSound
     hornSound: {sounds['horn']}
@@ -183,6 +200,14 @@ def one_line(value):
 def fluent(value):
     """Text as a Fluent string's value: on one line, its braces literal."""
     return "".join('{"' + c + '"}' if c in "{}" else c for c in one_line(value))
+
+
+def ftl_entry(key, value):
+    """A Fluent message: on one line, or a page of several lines indented under its key."""
+    lines = [l.strip() for l in str(value).split("\n") if l.strip()]
+    if len(lines) <= 1:
+        return f"{key} = {fluent(value)}\n"
+    return f"{key} =\n" + "".join(f"    {fluent(l)}\n" for l in lines)
 
 
 def text(value):
@@ -284,7 +309,7 @@ def front_row(seats, shield_f):
 
 # -- the check before export ----------------------------------------------------------------------
 
-LAMP_WORDS = ("head", "tail", "brake", "rear", "signal", "indicator", "blinker")
+LAMP_WORDS = ("head", "tail", "brake", "rear", "signal", "indicator", "blinker", "search")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -365,7 +390,7 @@ def check(project):
     for n in lamps:
         if not any(w in layers[n]["name"].lower() for w in LAMP_WORDS):
             warnings.append(f"{layers[n]['name']} is taken as a headlight: name a lamp with head, tail, brake, rear, "
-                            f"signal, indicator or blinker to tell the game what it is.")
+                            f"signal, indicator, blinker or search(light) to tell the game what it is.")
     if not any(X.lamp_role(layers[n]) == "head" for n in lamps):
         warnings.append("There are no headlights: the vehicle drives dark.")
 
@@ -487,6 +512,17 @@ def borrow_effects(repo, states, engine_id):
 # -- writing it -----------------------------------------------------------------------------------
 
 def write(gen, project, repo, progress=None, out=None):
+    """The vehicle written with its own camera (camera.py) throughout, sprites and seats alike; see
+    _write."""
+    before = getattr(gen, "camera", None)
+    gen.camera = C.resolve(project, V.Box.from_dict(project["box"]))
+    try:
+        return _write(gen, project, repo, progress, out)
+    finally:
+        gen.camera = before
+
+
+def _write(gen, project, repo, progress=None, out=None):
     """Writes everything into the repo and returns what it wrote. Raises ValueError with check()'s
     errors, or when the drawing runs off its sprite frame. With out, the files go into that folder,
     laid out as the repo is, and the repo is only read (which game features it has, the jeep's
@@ -547,6 +583,14 @@ def write(gen, project, repo, progress=None, out=None):
         strings[part_name(k)] = (layers[k]["kit"].get("name") or layers[k]["name"]).lower()
     strings[f"cmu-{loc}-part-wheels"] = "wheels"
 
+    def facing(n):
+        """The side of the vehicle a panel faces, as the game wears it from hits there (facing south,
+        +x is its left, -y its front)."""
+        x, y = vehicle_space(vox_of.get(n, [(0, 0, 0)]))
+        if abs(x) / MAX_HALF_WIDTH >= abs(y) / MAX_HALF_LENGTH:
+            return f"{1 if x > 0 else -1},0"
+        return f"0,{-1 if y < 0 else 1}"
+
     def part(n, kind, over_of, extra=""):
         pid = ids[n]
         x, y = vehicle_space(vox_of.get(n, [(0, 0, 0)]))
@@ -561,20 +605,27 @@ def write(gen, project, repo, progress=None, out=None):
     slots = []
     parts = ""
     hood = next((ids[n] for n in panels if layers[n].get("kind") == "hood"), None)
-    # With a windshield to fold onto it, the hood comes off as the jeep's does, so its raised lid can
-    # draw over the windshield from a layer of its own.
+    # With a windshield to fold onto it, the hood's raised lid draws over the windshield from a layer
+    # of its own.
     raised = f"{hood}_raised" if hood and shields else None
+    panel_slots = {}
     for n in panels:
         kind = layers[n].get("kind")
         exposes = [ids[m] for m in engines] if kind == "hood" else list(layers[n].get("exposes") or [])
         extra = ""
-        if raised and ids[n] == hood:
-            slot = f"vehicle-{hood.replace('_', '-')}"
-            slots.append((slot, part_name(n), HOOD_ITEM, HOOD_ITEM, False))
-            extra += f"      slot: {slot}\n"
+        item = PANEL_ITEMS.get(kind)
+        if item:
+            slot = f"vehicle-{ids[n].replace('_', '-')}"
+            slots.append((slot, part_name(n), item, item, False))
+            panel_slots[n] = slot
+            extra += f"      slot: {slot}\n      wearFacing: {facing(n)}\n"
         extra += f"      exposes: {flow(exposes)}\n" if exposes else ""
         if raised and ids[n] == hood:
             extra += f"      raisedLayer: {raised}\n"
+        if kind == "hood":
+            extra += "      ajarWhenWrecked: true\n"
+        if kind in ("tailgate", "boot", "hatch") and any(h == n for h in hosts.values()):
+            extra += "      blocksKitWhileOpen: true\n"
         extra += panel_sounds(sounds, kind)
         parts += part(n, "Panel", f"{ids[n]}_closed", extra)
     windshield_yaml = ""
@@ -602,6 +653,8 @@ def write(gen, project, repo, progress=None, out=None):
         parts += part(k, None, ids[k], extra)
 
     lamp_yaml = ""
+    lamp_slots = []
+    search = []
     for n in lamps:
         pid = ids[n]
         kind = X.lamp_role(layers[n])
@@ -612,12 +665,16 @@ def write(gen, project, repo, progress=None, out=None):
                 else "Right" if lay.get("sides") == "right" or "right" in lay["name"].lower()
                 else "Left" if x > 0 else "Right")
         over = over_directions(states, pid)
-        role_name = {"head": "Headlight", "tail": "TailLight", "signal": "TurnSignal"}[kind]
+        role_name = {"head": "Headlight", "tail": "TailLight", "signal": "TurnSignal", "search": "Searchlight"}[kind]
         lit = {"head": f"      litLayer: {pid}_on\n",
                "tail": f"      litLayer: {pid}_on\n      brakeLayer: {pid}_brake\n      signalLayer: {pid}_signal\n",
-               "signal": f"      signalLayer: {pid}_signal\n"}[kind]
+               "signal": f"      signalLayer: {pid}_signal\n", "search": ""}[kind]
+        if kind == "search":
+            search.append(pid)
+        lamp_slots.append(f"vehicle-{pid.replace('_', '-')}")
+        hit, share = LAMP_HITS[kind]
         anchors = ""
-        if kind == "head":
+        if kind in ("head", "search"):
             anchors = "      beamAnchors:\n"
             for v in X.DIRS:
                 lit_px = [p for p, c in states[f"{pid}_on"]["frames"][v][0].items() if c[3] == 255]
@@ -628,8 +685,10 @@ def write(gen, project, repo, progress=None, out=None):
         lamp_yaml += (f"    - id: {pid}\n      name: {lamp_name}\n"
                       + (f"      overRiders: {flow(over)}\n" if over else "")
                       + f"      role: {role_name}\n      side: {side}\n{lit}{anchors}      offset: {fmt(x)},{fmt(y)}\n"
+                      f"      hitChance: {hit}\n      damageShare: {share}\n"
                       f"      slot:\n        name: {lamp_name}\n        startingItem: {item}\n        disableEject: true\n"
-                      f"        swap: false\n        whitelist:\n          tags:\n          - {item}\n")
+                      + ("        insertOnInteract: false\n" if kind == "search" else "")
+                      + f"        swap: false\n        whitelist:\n          tags:\n          - {item}\n")
 
     # The hull: the body's footprint. A body no wider than the jeep's is held to the jeep's hull, so
     # it drives down a one tile corridor as the jeep does (its bodywork overhangs the hull, as the
@@ -653,7 +712,6 @@ def write(gen, project, repo, progress=None, out=None):
     hull = (hl, hb, hr, ht)
 
     seat_yaml = ""
-    hip = getattr(g, "RIDER_HIP_ROW", {"S": 19, "N": 20, "E": 18, "W": 18})
     half = max(-hull[0], hull[2]) + 0.5
     shield_f = min((k[0] for n in shields for k in vox_of.get(n, [])), default=None)
     sheltered = front_row(seats, shield_f) if shield_f is not None else set()
@@ -661,10 +719,10 @@ def write(gen, project, repo, progress=None, out=None):
         x, y = -s["r"] / TILE, -s["f"] / TILE
         px = ""
         for v in X.DIRS:
-            sx, sy = g.project(v, s["f"], s["r"], s["z"])
-            cy = sy + gen.dy[v] - (hip[v] - 16)
+            sx, sy = C.project(gen, v, s["f"], s["r"], s["z"])
+            cy = sy + C.dy(gen, v) - (C.hip(gen, v) - 16)
             px += f"        {DIRECTION[v]}: {round(sx)},{round(-cy)}\n"
-        clips = "".join(f"        {DIRECTION[v]}: {hip[v] - 16}\n" for v in X.DIRS)
+        clips = "".join(f"        {DIRECTION[v]}: {C.hip(gen, v) - 16}\n" for v in X.DIRS)
         door = s.get("door")
         door_yaml = ""
         if door in by_name and role.get(by_name[door]) == "panel":
@@ -725,6 +783,10 @@ def write(gen, project, repo, progress=None, out=None):
                     source = f"      source: Slot\n      slot: vehicle-{pid.replace('_', '-')}\n"
                 elif role[n] == "windshield":
                     source = f"      source: Slot\n      slot: {WINDSHIELD_SLOT}\n"
+                elif n in panel_slots:
+                    source = f"      source: Slot\n      slot: {panel_slots[n]}\n"
+                elif role[n] == "base":
+                    source = "      source: Hull\n"
                 else:
                     source = ""
                 rest = {"panel": [f"{pid}_closed"], "windshield": [f"{pid}_up_"],
@@ -800,7 +862,7 @@ def write(gen, project, repo, progress=None, out=None):
         overlay_layers += "    - map: [ rims ]\n      state: rims_wheels_overlay_0\n      visible: false\n"
     for n in lamps:
         pid = ids[n]
-        for suffix in {"head": ("on",), "tail": ("on", "brake", "signal"), "signal": ("signal",)}[X.lamp_role(layers[n])]:
+        for suffix in {"head": ("on",), "tail": ("on", "brake", "signal"), "signal": ("signal",), "search": ()}[X.lamp_role(layers[n])]:
             overlay_layers += f"    - map: [ {pid}_{suffix} ]\n      state: {pid}_{suffix}\n      shader: unshaded\n      visible: false\n"
     if "engine_smoke_0" in effects:
         overlay_layers += "    - map: [ smoke ]\n      state: engine_smoke_0\n      visible: false\n"
@@ -816,6 +878,10 @@ def write(gen, project, repo, progress=None, out=None):
     else:
         wheels_paint = (f"    wheelLayers: {flow(['rmc-wheels'] + list(wheel_kit_ids))}\n"
                         f"    wheelOverlayLayers: {flow(['wheels'] + list(wheel_kit_ids))}\n")
+    # Without lamps the list is still written, empty: the game won't take it null.
+    lamps_block = "\n" + lamp_yaml if lamp_yaml else " []\n"
+    # Drawn the same whichever way it faces: crayons go on the one view, at every heading.
+    fixed = f"    fixedDirection: {DIRECTION[gen.camera.view]}\n" if gen.camera.one else ""
     front = f"  - type: CMUVehicleFrontDamage\n    frontVoxel: {front_voxel}\n"
     if hood:
         front += f"    closedHoodState: {hood}_closed_dent\n" + (f"    closedPanel: {hood}\n" if hood != "hood" else "")
@@ -837,12 +903,39 @@ def write(gen, project, repo, progress=None, out=None):
     if shield_ids or plain_over_damage:
         paint += f"    plainOverlayLayers: {flow(shield_ids + plain_over_damage)}\n"
 
-    containers = "".join(f"      {slot}: !type:ContainerSlot\n" for slot, *_ in slots)
+    # Every slot's container, the lamps' too (their slots are added when the vehicle spawns), so
+    # spawning one doesn't change its prototype.
+    containers = "".join(f"      {slot}: !type:ContainerSlot\n" for slot in [s[0] for s in slots] + lamp_slots)
     item_slots = ""
     for slot, label, item, tag, eject in slots:
         item_slots += (f"      {slot}:\n        name: {label}\n        startingItem: {item}\n"
                        + ("" if eject else "        disableEject: true\n        swap: false\n")
                        + f"        whitelist:\n          tags:\n          - {tag}\n")
+
+    searchlight_yaml = ""
+    if search:
+        searchlight_yaml = ("  - type: CMUVehicleSearchlight\n    maxYawDegrees: 45\n    rotationSpeed: 220\n"
+                            "    switchSound:\n      path: /Audio/Machines/lightswitch.ogg\n      params:\n        volume: -4\n")
+    debris = [DEBRIS["wheel"]] + ([DEBRIS["windshield"]] if shields else []) \
+        + ([DEBRIS["headlight"]] if any(X.lamp_role(layers[n]) == "head" for n in lamps) else []) \
+        + ([DEBRIS["engine"]] if engines else [])
+
+    by_role = {}
+    for n in lamps:
+        by_role.setdefault(X.lamp_role(layers[n]), []).append(ids[n])
+    fuel_doors = [ids[n] for n in panels if layers[n].get("kind") == "fueldoor"]
+    manual_parts = {
+        "panels": [(ids[n], layers[n].get("kind"), layers[n]["name"]) for n in panels if ids[n] not in fuel_doors],
+        "fuel": fuel_doors,
+        "engines": [ids[n] for n in engines],
+        "shields": [ids[n] for n in shields],
+        "seats": [(s["id"], bool(s.get("driver"))) for s in seats],
+        "kits": [(ids[k], next((p for p, v in KIT_PRESETS.items() if v["item"] == layers[k]["kit"].get("item")), None),
+                  layers[k]["kit"].get("name") or layers[k]["name"]) for k in kits],
+        "lamps": by_role,
+    }
+    manual_yaml, manual_strings = M.build(repo, name, ident, loc, where["tex"], slug, states, manual_parts, stats)
+    strings.update(manual_strings)
 
     name_text = veh.get("description") or f"A {name} drawn in CMU Open Vehicles."
     yml = f"""# Written by CMU Open Vehicles from {os.path.basename(veh.get('source', slug + '.cmuov'))}.
@@ -860,18 +953,17 @@ def write(gen, project, repo, progress=None, out=None):
     engineBay: {box_text(bay)}
     parts:
 {parts}{windshield_yaml}  - type: CMUVehicleLamps
-    lamps:
-{lamp_yaml}  - type: Clickable
+    lamps:{lamps_block}  - type: Clickable
     bounds:
 {bounds}  - type: CMUVehicleCrayon
     map: /Textures/{where['tex']}/crayon.png
     panels: {flow(panel_ids)}
-{paint}{interior}{wheels_paint}{front}{damage_yaml}  - type: CMUVehicleHeadlights
+{fixed}{paint}{interior}{wheels_paint}{front}{damage_yaml}  - type: CMUVehicleHeadlights
     switchSound:
       path: /Audio/Machines/lightswitch.ogg
       params:
         volume: -4
-  - type: Fixtures
+{searchlight_yaml}  - type: Fixtures
     fixtures:
       world:
 {fixture(['Impassable', 'HighImpassable', 'LowImpassable', 'LargeMobLayer'], ['LargeMobLayer'])}      mob:
@@ -911,6 +1003,7 @@ def write(gen, project, repo, progress=None, out=None):
   - type: CMUVehicleWreck
     wreckPrototype: CMUVehicle{ident}Wreck
     engineBay: {fmt(bay_centre[0])},{fmt(bay_centre[1])}
+    debrisPrototypes: {flow(debris)}
 
 - type: entity
   id: CMUVehicle{ident}Overlay
@@ -942,14 +1035,69 @@ def write(gen, project, repo, progress=None, out=None):
   - type: Sprite
     sprite: {where['tex']}/{slug}.rsi
     state: wreck
-"""
+  # Its own footprint, not the jeep's.
+  - type: Fixtures
+    fixtures:
+      fix1:
+        shape:
+          !type:PhysShapeAabb
+          bounds: {box_text(hull)}
+        density: 800
+        mask:
+        - Impassable
+        - HighImpassable
+        - LowImpassable
+        - LargeMobLayer
+        layer:
+        - LargeMobLayer
+
+# How it's got: whole in a kit crate, ordered from cargo, launched from a dropship or called down with
+# a flare, as the jeep is.
+- type: entity
+  parent: CMUCrateJeepBase
+  id: CMUCrate{ident}
+  name: {text(name + ' crate')}
+  description: {text(f'A whole {name} in a wooden crate, on its wheels and ready to drive. Unlatch it by hand on clear ground and the walls fall away.')}
+  components:
+  - type: CMUVehicleCrate
+    manual: CMU{ident}Manual
+    vehicle: CMUVehicle{ident}
+
+- type: entity
+  parent: CMUDropshipAttachmentAmmoLaunchableJeepBase
+  id: CMUDropshipAttachmentAmmoLaunchable{ident}
+  name: {text('air-droppable ' + name)}
+  description: {text(f'A {name} crate rigged with a parachute. Load it into the LAG-14 Internal Sentry Launcher and launch it at a laser or flare; it lands as a crate to unlatch.')}
+  components:
+  - type: RMCOrbitalDeployable
+    deployPrototype: CMUCrate{ident}
+    dropPod: false
+    useParachute: true
+    dropDuration: 4
+    arrivingSound: /Audio/_RMC14/Items/fulton.ogg
+
+- type: entity
+  parent: CMUFlareJeepDropCLF
+  id: CMUFlare{ident}Drop
+  name: {text(name + ' drop flare')}
+  description: {text(f'A signal flare wired to a smuggler\'s beacon. Light it and throw it on open ground; a {name} in its crate comes down by parachute where it burns.')}
+  components:
+  - type: CMUVehicleDropFlare
+    crate: CMUCrate{ident}
+{manual_yaml}"""
     os.makedirs(os.path.dirname(where["proto"]), exist_ok=True)
     with open(where["proto"], "w", encoding="utf-8", newline="\n") as fh:
         fh.write(yml)
     os.makedirs(os.path.dirname(where["ftl"]), exist_ok=True)
     with open(where["ftl"], "w", encoding="utf-8", newline="\n") as fh:
-        fh.write("".join(f"{k} = {fluent(v)}\n" for k, v in strings.items()))
-    return {"id": f"CMUVehicle{ident}", "rsi": where["rsi"], "crayon": where["crayon"], "prototypes": where["proto"],
+        fh.write("".join(ftl_entry(k, v) for k, v in strings.items()))
+    spawnables = {f"CMUCrate{ident}": "Its kit crate: unlatch it by hand and it opens into the vehicle, with its manual",
+                  f"CMUFlare{ident}Drop": "A drop flare that brings the crate down by parachute",
+                  f"CMUDropshipAttachmentAmmoLaunchable{ident}": "A LAG-14 launch-bay round of the crate",
+                  f"CMU{ident}Manual": "Its field manual"}
+    return {"id": f"CMUVehicle{ident}", "crate": f"CMUCrate{ident}", "flare": f"CMUFlare{ident}Drop",
+            "cost": int(veh.get("cost") or DEFAULT_COST), "spawnables": spawnables,
+            "rsi": where["rsi"], "crayon": where["crayon"], "prototypes": where["proto"],
             "strings": where["ftl"], "states": len(states), "effects": effects,
             "hull": box_text(hull), "corridor": corridor, "damageStates": bool(damage_yaml),
             "warnings": warnings,

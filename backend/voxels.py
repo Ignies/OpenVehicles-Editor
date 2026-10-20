@@ -45,6 +45,8 @@ import time
 import numpy as np
 from PIL import Image
 
+import camera as C
+
 EMPTY = 255
 OUT = 128
 VIEWS = ("top", "side", "left", "front", "back")
@@ -85,8 +87,8 @@ def room(gen, box, margin=1):
     def inside(points):
         for view in "SNEW":
             for f, r, z in points:
-                sx, sy = g.project(view, f, r, z)
-                x, y = FRAME / 2 + sx, FRAME / 2 + gen.dy[view] + sy
+                sx, sy = C.project(gen, view, f, r, z)
+                x, y = FRAME / 2 + sx, FRAME / 2 + C.dy(gen, view) + sy
                 if not (margin <= x <= FRAME - margin and margin <= y <= FRAME - margin):
                     return False
         return True
@@ -832,6 +834,8 @@ def build(project, box, materials, views, skip=(), gen=None, frame=0):
     count = 0
     phase = wheel_phase(gen, frame)
     layers = project["layers"]
+    # The generator view each direction is drawn as: its own, or with one view for all, that one.
+    letter = {v: C.of(gen).letter(v) if gen is not None else v for v in views}
     for n, layer in enumerate(layers):
         if not layer.get("visible", True) or layer.get("stage"):
             per_layer.append(None)
@@ -849,13 +853,14 @@ def build(project, box, materials, views, skip=(), gen=None, frame=0):
             edits = native_edits(gen, source, box, materials)
             coloured = {}
             for v in views:
-                own = native(gen, source, v, phase)
+                own = native(gen, source, letter[v], phase)
                 coloured[v] = apply_edits(own or {}, edits, box, source, materials, part)
             count += len(coloured[views[0]])
         else:
             occ, mats = carve(source, box)
             count += int(occ.sum())
-            coloured = colour_layer(occ, mats, materials, box, part, views)
+            by_letter = colour_layer(occ, mats, materials, box, part, sorted(set(letter.values())))
+            coloured = {v: by_letter[letter[v]] for v in views}
             if frame and layer.get("kind") == "wheel":
                 coloured = {v: spin_wheels(c, frame * SPIN_STEP) for v, c in coloured.items()}
         per_layer.append(coloured)
@@ -923,13 +928,19 @@ def project_chassis(gen, project, box):
 @contextlib.contextmanager
 def styled(gen, project, box):
     """Renders with the project's own chassis while it's one drawn in the tool, so the dirt follows its
-    wheels and its paint comes clean; a project loaded from the generator keeps the generator's."""
-    c = project_chassis(gen, project, box)
-    if c is None:
-        yield
-        return
-    with gen.module.chassis(c):
-        yield
+    wheels and its paint comes clean; a project loaded from the generator keeps the generator's. And
+    with the project's camera (camera.py), on the generator as gen.camera while it lasts."""
+    before = getattr(gen, "camera", None)
+    gen.camera = C.resolve(project, box)
+    try:
+        c = project_chassis(gen, project, box)
+        if c is None:
+            yield
+            return
+        with gen.module.chassis(c):
+            yield
+    finally:
+        gen.camera = before
 
 
 # -- driving --------------------------------------------------------------------------------------
@@ -1231,13 +1242,13 @@ def render_sprite(gen, view, vox, owner, colours=None, phase=0.0, wheels=None, k
     where a wheel shows: those layers' voxels of those parts. Keys, an int16 array [OUT, OUT, 3], takes
     the voxel each pixel shows (glass its glass voxel); the rest is left as it was."""
     g = gen.module
-    buf, glass = g.render(g.Model(vox), view)
+    buf, glass = C.render(gen, view, g.Model(vox))
     col = g.shade(buf)
     img = Image.new("RGBA", (OUT, OUT), (0, 0, 0, 0))
     px = img.load()
     parts = np.zeros((OUT, OUT), np.uint8)
     mask = np.zeros((OUT, OUT), bool)
-    ox, oy = OUT // 2, OUT // 2 + gen.dy[view]
+    ox, oy = OUT // 2, OUT // 2 + C.dy(gen, view)
 
     def layer_of(key):
         return owner.get(key, -1) + 1
@@ -1252,11 +1263,22 @@ def render_sprite(gen, view, vox, owner, colours=None, phase=0.0, wheels=None, k
                 keys[Y, X] = e[4]
             if wheels:
                 mask[Y, X] = owner.get(e[4], -1) in wheels[0] and e[2] in wheels[1]
+    # A finished sprite's own pixels over what its blocks drew.
+    cam = C.of(gen)
+    if getattr(cam, "sprite", None):
+        import sprite as S
+        shown = S.composite(cam.sprite)
+        off = (OUT - S.SIZE) // 2
+        for (x, y) in col:
+            X, Y = x + ox, y + oy
+            c = shown.get((X - off, Y - off))
+            if c is not None and 0 <= X < OUT and 0 <= Y < OUT:
+                px[X, Y] = c
     # The far axle's wheels, which the generator adds where nothing else is drawn in front and back
     # views, when the wheels are the generator's own.
     wheel_owner = next((owner[k] for k, (_, part) in vox.items() if part == "wheel" and k in owner), None)
-    if wheel_owner is not None and hasattr(g, "far_wheels"):
-        for (x, y), c in g.far_wheels(view, set(col), phase).items():
+    if wheel_owner is not None and hasattr(g, "far_wheels") and C.far_wheels(gen, view):
+        for (x, y), c in g.far_wheels(C.of(gen).letter(view), set(col), phase).items():
             X, Y = x + ox, y + oy
             if 0 <= X < OUT and 0 <= Y < OUT and (x, y) not in col:
                 px[X, Y] = tuple(c) if len(c) == 4 else (*c, 255)

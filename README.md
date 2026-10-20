@@ -21,6 +21,20 @@ Projects are kept in the browser that made them (**Save**, and they save themsel
 **Open** lists them, or opens a `.cmuov` from the computer, and **Download** gives you the `.cmuov`
 to keep or share.
 
+## Hosting
+
+On a Debian or Ubuntu server, as root, one line sets it all up (Python, the game data, a service, and
+Caddy in front on port 80) and run again updates it:
+
+```
+curl -fsSL https://raw.githubusercontent.com/Ignies/OpenVehicles-Editor/main/install.sh | sudo bash
+```
+
+It serves `openvehicles.ignies.net` by default; `sudo env DOMAIN=example.org bash` in place of
+`sudo bash` names another, and `HTTPS=1` has Caddy serve it on 443 with a certificate it gets itself.
+The game data is a sparse clone of the CMU repo's jeeps branch (`CMU_REPO`, `CMU_REF`), only the
+paths in `gamedata.txt`. Logs: `journalctl -u openvehicles -f`.
+
 ## How it works
 
 A vehicle is a stack of **layers**: body, wheels, each door, hood, tailgate, rear hatch or boot lid, windshield,
@@ -107,6 +121,31 @@ changes it, the app reloads it (unless it has unsaved changes of its own).
 The side panel's tabs: **Layers** (and damage states), **Draw** (materials and brush), **Paint**,
 **Vehicle** (wheels, driving, the game; the box's **Shape**: Keep resizes the box around the drawing,
 Stretch scales every drawing with it) and **Generate**. Ctrl+1 to 5 switch them.
+
+### Camera
+
+The Vehicle tab's **Camera** card sets how each sprite direction sees the vehicle: **Game's views**
+(the generator's, as the jeep is drawn), **Custom** (pitch, yaw, zoom and stretch per direction) or
+**One view** (one direction's picture for all four: it looks the same whichever way it faces, and
+crayons go on what that view shows). A one view vehicle needs the game's crayon `fixedDirection`.
+
+### Importing a finished sprite
+
+**New → Import a sprite…** takes an Aseprite file (or a PNG per layer, named by its file) drawn from
+above, and the way its front points in the picture. Its layers by name:
+
+| Layer | What it is |
+| --- | --- |
+| `base`, `overlay` | The body, under and over the riders |
+| `damaged`, `damaged_overlay` | The body worn (else scuffed for you) |
+| `wreck` | The burnt out wreck (else the body burnt dark) |
+| `wheels` | What shows of the wheels (else hidden wheels under the body) |
+| `door_driver`, `door_passenger`, `hood`, `tailgate`, `boot`, `hatch`, `fuel_door` | Panels, each with `_open` for its look opened |
+| `headlight_left`, `taillight_right`, `signal_left`, `searchlight`, ... | Lamps |
+
+The picture is used as drawn, for all four directions; the tool presses each layer into a block for
+the hull, clicks, seats and crayon map. The board shows the picture alone: pick a seat in the Seats
+card and click where its rider sits. **4 dir workspace** on the Camera card shows the blocks.
 
 ## Keys
 

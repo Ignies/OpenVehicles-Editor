@@ -379,6 +379,8 @@ export class Project {
     this.refs = {};
     // Materials of its own, beyond the generator's: [{ name, color }].
     this.customMaterials = [];
+    // Imported as a finished sprite (backend/sprite.py): { nose, size, pictures: { key: data URL } }.
+    this.sprite = null;
   }
 
   get layer() { return this.layers[this.active]; }
@@ -421,7 +423,8 @@ export class Project {
       Object.assign(l, { sides: spec.sides, thickness: spec.thickness, visible: spec.visible !== false,
         role: spec.role || null, rides: spec.rides || null, native: spec.native || null,
         stage: spec.stage ? { ...spec.stage } : null, locked: !!spec.locked,
-        hinge: spec.hinge ? { ...spec.hinge } : null, kit: spec.kit ? { ...spec.kit } : null });
+        hinge: spec.hinge ? { ...spec.hinge } : null, kit: spec.kit ? { ...spec.kit } : null,
+        picture: spec.picture || null });
       if (spec.voxels) {
         l.voxels = spec.voxels instanceof Uint8Array ? spec.voxels : Project.decodeVoxels(spec.voxels, p.box);
         l.native = null;
@@ -458,7 +461,7 @@ export class Project {
           layer: l,
           props: { kind: l.kind, name: l.name, sides: l.sides, thickness: l.thickness, visible: l.visible, locked: l.locked,
             role: l.role, rides: l.rides, native: l.native, stage: l.stage ? { ...l.stage } : null,
-            hinge: l.hinge ? { ...l.hinge } : null, kit: l.kit ? { ...l.kit } : null },
+            hinge: l.hinge ? { ...l.hinge } : null, kit: l.kit ? { ...l.kit } : null, picture: l.picture || null },
           voxels: l.voxels,
           views: Object.fromEntries(VIEWS.map((v) => [v, { mat: l.views[v].mat.slice(), depth: l.views[v].depth.slice() }])),
         };
@@ -486,10 +489,15 @@ export class Project {
    * voxel layer sends its voxels in place of its views. */
   toBackend(show = {}) {
     return {
+      // How it's seen in each sprite direction (backend/camera.py): every drawing follows it.
+      ...(this.vehicle?.camera ? { camera: this.vehicle.camera } : {}),
+      // A vehicle imported as a finished sprite: its pictures, which its states are drawn with.
+      ...(this.sprite ? { sprite: this.sprite } : {}),
       layers: this.layers.map((l) => ({
         name: l.name, kind: l.kind, sides: l.sides, thickness: l.thickness, visible: l.visible, locked: l.locked,
         role: l.role, rides: l.rides, native: l.native, stage: l.stage,
         ...(l.hinge ? { hinge: l.hinge } : {}), ...(l.kit ? { kit: l.kit } : {}),
+        ...(l.picture ? { picture: l.picture } : {}),
         ...(show[l.name] ? { show_stage: show[l.name] } : {}),
         ...(l.voxels ? { voxels: l.encodedVoxels() }
           : { views: Object.fromEntries(VIEWS.map((v) => [v, { mat: b64(l.views[v].mat), depth: b64(l.views[v].depth) }])) }),
@@ -534,6 +542,7 @@ export class Project {
     p.active = Math.min(data.active || 0, p.layers.length - 1);
     p.vehicle = data.vehicle || null;
     p.refs = data.refs || {};
+    p.sprite = data.sprite || null;
     p.customMaterials = data.customMaterials || [];
     return { project: p, extra: data };
   }
@@ -563,6 +572,8 @@ export class ViewCanvas {
     this.buffer = document.createElement('canvas');
     this.bctx = this.buffer.getContext('2d');
     this.scale = 1;
+    // Degrees the view is shown turned clockwise: an imported sprite's top view as its picture is drawn.
+    this.turn = 0;
     this.hover = null;
     this.link = null;
     this.drag = null;
@@ -600,7 +611,10 @@ export class ViewCanvas {
     const { rows, cols, maxDepth } = this.shape;
     const r = this.stage.getBoundingClientRect();
     if (!r.width) return;
-    this.scale = Math.max(1, Math.floor(Math.min((r.width - 24) / cols, (r.height - 20) / rows)));
+    const sideways = this.turn % 180 !== 0;
+    const [across, down] = sideways ? [rows, cols] : [cols, rows];
+    this.scale = Math.max(1, Math.floor(Math.min((r.width - 24) / across, (r.height - 20) / down)));
+    for (const c of [this.canvas, this.overlay, this.ref]) c.style.transform = this.turn ? `rotate(${this.turn}deg)` : '';
     for (const c of [this.canvas, this.overlay]) {
       c.width = cols * this.scale;
       c.height = rows * this.scale;
@@ -884,11 +898,24 @@ export class ViewCanvas {
     });
   }
 
+  /** Shows the view turned clockwise by degrees (a multiple of 90). */
+  setTurn(degrees) {
+    if (this.turn === degrees) return;
+    this.turn = degrees;
+    this.fit();
+  }
+
   cell(e) {
     const r = this.canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - r.left) / this.scale);
-    const y = Math.floor((e.clientY - r.top) / this.scale);
     const { rows, cols } = this.shape;
+    // The pointer from the middle of the canvas, turned back by the view's turn.
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    const a = (-this.turn * Math.PI) / 180;
+    const ux = dx * Math.cos(a) - dy * Math.sin(a);
+    const uy = dx * Math.sin(a) + dy * Math.cos(a);
+    const x = Math.floor((ux + (cols * this.scale) / 2) / this.scale);
+    const y = Math.floor((uy + (rows * this.scale) / 2) / this.scale);
     return x >= 0 && y >= 0 && x < cols && y < rows ? { x, y } : null;
   }
 

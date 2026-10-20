@@ -214,6 +214,51 @@
     });
   }
 
+  /** A finished sprite to import: its files (an Aseprite file, or a PNG per layer), the way its nose
+   * points in the picture and its name. Null if cancelled. */
+  function importDialog() {
+    return modal(async (box, close) => {
+      box.innerHTML = '<header><b>Import a sprite</b><span>One picture, for all four directions</span></header>'
+        + '<div class="import-body">'
+        + '<button class="btn" data-pick>Choose an Aseprite file or PNGs…</button><p class="note" data-files>Nothing chosen.</p>'
+        + '<p class="note">Layers by name: <b>base</b>, <b>overlay</b> (over the riders), and if drawn <b>wreck</b>, <b>damaged</b>, '
+        + '<b>wheels</b>, <b>door_driver</b>, <b>door_passenger</b>, <b>hood</b>, <b>tailgate</b> (each with <b>_open</b>), '
+        + '<b>headlight_left</b>, <b>taillight_right</b>, <b>signal_left</b>, <b>searchlight</b>… A PNG is the layer its file is named.</p>'
+        + '<label class="import-row"><span>Its front points</span><div class="segmented" data-nose>'
+        + '<button data-value="N" class="on">Up</button><button data-value="E">Right</button><button data-value="S">Down</button><button data-value="W">Left</button></div></label>'
+        + '<label class="import-row"><span>Name</span><input class="modal-input" data-name spellcheck="false" placeholder="armored car"></label>'
+        + '</div><footer><button class="btn subtle" data-cancel>Cancel</button><button class="btn primary" data-ok disabled>Import</button></footer>';
+      let files = [];
+      let nose = 'N';
+      const ok = box.querySelector('[data-ok]');
+      const name = box.querySelector('[data-name]');
+      for (const b of box.querySelectorAll('[data-nose] button')) {
+        b.addEventListener('click', () => {
+          nose = b.dataset.value;
+          for (const o of box.querySelectorAll('[data-nose] button')) o.classList.toggle('on', o === b);
+        });
+      }
+      box.querySelector('[data-pick]').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.aseprite,.ase,.png,image/png';
+        input.addEventListener('change', () => {
+          files = [...input.files];
+          box.querySelector('[data-files]').textContent = files.length ? files.map((f) => f.name).join(', ') : 'Nothing chosen.';
+          if (files.length && !name.value) name.value = files[0].name.replace(/\.[^.]*$/, '').replace(/[_-]+/g, ' ');
+          ok.disabled = !files.length;
+        });
+        input.click();
+      });
+      ok.addEventListener('click', async () => {
+        const read = await Promise.all(files.map(async (f) => ({ name: f.name, data: await readDataUrl(f) })));
+        close({ files: read, nose, name: name.value.trim() || 'vehicle' });
+      });
+      box.querySelector('[data-cancel]').addEventListener('click', () => close(null));
+    });
+  }
+
   const base = (path) => String(path || '').replace(/^(store:|download:|upload:\d+\/)/, '').split(/[\\/]/).pop();
 
   // -- the API app.js uses ---------------------------------------------------------------------------
@@ -297,6 +342,7 @@
       return `store:${n === 1 ? stem : `${stem} ${n}`}`;
     },
     download,
+    importDialog,
   };
 
   connect();

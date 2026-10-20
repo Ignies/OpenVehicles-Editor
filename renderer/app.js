@@ -120,6 +120,7 @@ class App {
     this.setupTabs();
     this.setupStages();
     this.setupGame();
+    this.setupCamera();
     this.setupKeys();
     for (const section of $$('.view')) this.views[section.dataset.view] = new ViewCanvas(section, section.dataset.view, this);
     this.depthPanel = new DepthPanel($('#depthPanel'), this);
@@ -822,9 +823,30 @@ class App {
 
   // -- the board of views ------------------------------------------------------------------------------
 
+  /** Whether the board shows the imported picture alone: a sprite project, out of the 4 dir workspace. */
+  spriteOnly() {
+    return this.project?.vehicle?.camera?.mode === 'sprite' && !this.fourDir;
+  }
+
   layoutBoard() {
     const box = this.project?.box || DEFAULT_BOX;
     const board = $('#board');
+    const only = this.spriteOnly();
+    board.classList.toggle('sprite-only', only);
+    for (const s of $$('#board > [data-view]')) s.hidden = only && s.dataset.view !== 'top';
+    // The top view is drawn nose right: turned so the picture shows as it was drawn.
+    const nose = this.project?.vehicle?.camera?.nose;
+    this.views.top?.setTurn(only ? ({ S: 90, W: 180, N: 270 }[nose] || 0) : 0);
+    if (only) {
+      // The picture, seen from above, takes the whole board: seats, lamps and parts are placed on it.
+      board.style.gridTemplateColumns = '1fr';
+      board.style.gridTemplateRows = '1fr';
+      const top = $('[data-view="top"]');
+      top.style.gridRow = 1;
+      top.style.gridColumn = 1;
+      for (const v of Object.values(this.views)) v.fit();
+      return;
+    }
     board.style.gridTemplateColumns = `${box.length}fr ${box.width}fr`;
     board.style.gridTemplateRows = `${box.height}fr ${box.height}fr ${box.width}fr`;
     // Side, left and top share the length; front beside the side and back beside the left share
@@ -1210,6 +1232,7 @@ class App {
     this.drives.clear();
     this.setFile(file);
     this.setDirty(false);
+    this.fourDir = false;
     const b = project.box;
     $('#boxL').value = b.length;
     $('#boxW').value = b.width;
@@ -1220,7 +1243,8 @@ class App {
     this.renderRefs();
     this.refreshRoom();
     this.renderDriving();
-    this.focusView(this.views.side);
+    this.renderCamera();
+    this.focusView(this.spriteOnly() ? this.views.top : this.views.side);
     this.schedulePreview(0);
   }
 
@@ -1233,6 +1257,7 @@ class App {
       menu.append(b);
     };
     add('Blank', 'A body to draw from scratch.', () => this.newProject());
+    if (api.importDialog) add('Import a sprite…', 'An Aseprite file or PNGs, drawn from above: one picture for all four directions.', () => this.importSprite());
     menu.insertAdjacentHTML('beforeend', '<div class="menu-sep"></div><div class="menu-label">From a template</div>');
     const title = (n) => n[0].toUpperCase() + n.slice(1).replace(/-/g, ' ');
     try {
@@ -1268,6 +1293,27 @@ class App {
       this.toast(`New <b>${this.escape(name)}</b> from its template: every part's a voxel layer to reshape · slice a view to work inside`, false, 3600);
     } catch (err) {
       this.toast(`<b>Template</b> ${this.escape(this.short(err.message))}`, true, 5000);
+    }
+  }
+
+  /** A new project from a finished sprite (backend/sprite.py): its layers' pictures drawn as they are,
+   * the same whichever way it faces. */
+  async importSprite() {
+    if (!this.confirmDiscard('new')) return;
+    const picked = await api.importDialog();
+    if (!picked) return;
+    try {
+      const data = await api.call('import_sprite', picked);
+      const p = Project.fromBackend(data, this.materials);
+      p.vehicle = data.vehicle || null;
+      p.sprite = data.sprite;
+      p.refs = data.refs || {};
+      this.setProject(p);
+      const parts = p.layers.map((l) => l.name).join(', ');
+      this.toast(`Imported <b>${this.escape(data.vehicle.name)}</b>: ${this.escape(parts)}. Drag the seats onto the picture.`
+        + (data.warnings?.length ? `<br>${data.warnings.map((w) => this.escape(w)).join('<br>')}` : ''), !!data.warnings?.length, 6000);
+    } catch (err) {
+      this.toast(`<b>Import</b> ${this.escape(this.short(err.message))}`, true, 6000);
     }
   }
 
@@ -1589,6 +1635,77 @@ class App {
     }
   }
 
+  // -- the camera: how each sprite direction sees the vehicle ---------------------------------------------
+
+  setupCamera() {
+    this.segmented($('#cameraMode'), (mode) => this.setCamera({ ...(this.vehicle().camera || {}), mode }));
+    this.segmented($('#cameraView'), (view) => this.setCamera({ ...(this.vehicle().camera || {}), mode: 'single', view }));
+    $('#cameraReset').addEventListener('click', () => this.setCamera(null));
+    $('#cameraFourDir').addEventListener('click', () => {
+      this.fourDir = !this.fourDir;
+      this.layoutBoard();
+      this.renderCamera();
+    });
+  }
+
+  /** A new camera for the vehicle (null for the game's own views): every drawing is made again. */
+  setCamera(camera) {
+    const v = this.vehicle();
+    if (!camera || camera.mode === 'generator') delete v.camera;
+    else v.camera = camera;
+    this.structureChanged();
+    this.renderCamera();
+  }
+
+  async renderCamera() {
+    if (!this.project) return;
+    const cam = this.project.vehicle?.camera || { mode: 'generator' };
+    const mode = cam.mode || 'generator';
+    // An imported sprite keeps its own camera: straight down on its picture.
+    const sprite = mode === 'sprite';
+    $('#cameraMode').hidden = sprite;
+    $('#cameraReset').hidden = sprite;
+    $('#cameraSprite').hidden = !sprite;
+    if (sprite) {
+      const names = { N: 'up', E: 'right', S: 'down', W: 'left' };
+      $('#cameraNose').textContent = `Seen from above, its front pointing ${names[cam.nose] || 'up'} in the picture.`;
+      $('#cameraFourDir').classList.toggle('on', !!this.fourDir);
+    }
+    $('#cameraMode').setValue?.(mode);
+    $('#cameraSingle').hidden = mode !== 'single';
+    $('#cameraView').setValue?.(cam.view || 'S');
+    const dirs = $('#cameraDirs');
+    dirs.hidden = mode !== 'custom';
+    $('#cameraNote').textContent = {
+      generator: 'Each direction drawn as the jeep is: the generator\'s own views.',
+      custom: 'Pitch is how far above the horizon the camera looks down; yaw turns the vehicle on top of facing that way; zoom scales it; stretch draws it wider than tall.',
+      single: 'The same picture whichever way it faces. Crayons go on what that view shows.',
+      sprite: 'Its picture as drawn, for all four directions. The 4 dir workspace shows the blocks it is pressed into, to reshape them.',
+    }[mode];
+    if (mode !== 'custom') return;
+    this.cameraDefaults ||= (await api.call('camera_defaults').catch(() => ({ dirs: {} }))).dirs;
+    dirs.innerHTML = '<span></span><span>Pitch</span><span>Yaw</span><span>Zoom</span><span>Stretch</span>';
+    const names = { S: 'Front', N: 'Back', E: 'Right', W: 'Left' };
+    const fields = [['pitch', 0, 90, 1], ['yaw', -180, 180, 1], ['zoom', 0.25, 4, 0.05], ['stretch', 0.25, 3, 0.05]];
+    for (const d of ['S', 'N', 'E', 'W']) {
+      dirs.insertAdjacentHTML('beforeend', `<span class="cam-dir">${names[d]}</span>`);
+      for (const [key, min, max, step] of fields) {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = min;
+        input.max = max;
+        input.step = step;
+        input.value = cam.dirs?.[d]?.[key] ?? this.cameraDefaults?.[d]?.[key] ?? '';
+        input.addEventListener('change', () => {
+          const next = { ...cam, mode: 'custom', dirs: { ...(cam.dirs || {}) } };
+          next.dirs[d] = { ...(this.cameraDefaults?.[d] || {}), ...(next.dirs[d] || {}), [key]: Math.min(max, Math.max(min, +input.value || 0)) };
+          this.setCamera(next);
+        });
+        dirs.append(input);
+      }
+    }
+  }
+
   /** The vehicle's game block, made when first needed. */
   vehicle() {
     const p = this.project;
@@ -1717,7 +1834,8 @@ class App {
   /** Arms a seat to be placed by the next click on a view (null disarms). */
   placeSeat(n) {
     this.placingSeat = n;
-    if (n != null) this.toast('Click where the rider sits on the <b>Top</b> view, then the <b>Side</b> or <b>Left</b> view for their height · Esc to stop', false, 3000);
+    if (n != null && this.spriteOnly()) this.toast('Click where the rider sits on the picture · Esc to stop', false, 3000);
+    else if (n != null) this.toast('Click where the rider sits on the <b>Top</b> view, then the <b>Side</b> or <b>Left</b> view for their height · Esc to stop', false, 3000);
     this.renderGame();
   }
 
@@ -1735,7 +1853,8 @@ class App {
     else if (view === 'front') { s.r = r(W - 1 - c.x); s.z = H - 1 - c.y; }
     else { s.r = r(c.x); s.z = H - 1 - c.y; }
     this.setDirty(true);
-    if (view !== 'top') this.placingSeat = null;
+    // A sprite's riders sit on its picture: where they are on it is all there is to place.
+    if (view !== 'top' || this.spriteOnly()) this.placingSeat = null;
     this.renderGame();
     return true;
   }
