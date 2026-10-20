@@ -24,7 +24,9 @@ to keep or share.
 ## Hosting
 
 On a Debian or Ubuntu server, as root, one line sets it all up (Python, the game data, a service, and
-Caddy in front on port 80) and run again updates it:
+its site on port 80) and run again updates it. It only adds its own site beside what the server
+already hosts, through the nginx, Apache or Caddy already on port 80 (its config tested, then
+reloaded), or a new Caddy when there's none:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/Ignies/OpenVehicles-Editor/main/install.sh | sudo bash
