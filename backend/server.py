@@ -20,6 +20,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project as P  # noqa: E402
 import voxels as V  # noqa: E402
 
+# Run for the web tool (web.py starts one of these per browser tab): the generator is the server's,
+# never a path the page sends; files are written only into the session's own folder, and handed out
+# as downloads; nothing runs on, or writes into, a repo on the machine.
+WEB = os.environ.get("CMUOV_WEB") == "1"
+WEB_GENERATOR = os.environ.get("CMUOV_GENERATOR")
+WORKDIR = os.environ.get("CMUOV_WORKDIR")
+# What the web tool can't do: run the generator into a repo, lint or commit one, start the game.
+DESKTOP_ONLY = {"generate", "cancel_generate", "lint", "git_state", "commit",
+                "game_start", "game_status", "game_spawn", "game_command", "game_stop"}
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except AttributeError:
@@ -49,7 +59,8 @@ class Server:
 
     def run(self):
         threading.Thread(target=self.work, daemon=True).start()
-        threading.Thread(target=self.watch, daemon=True).start()
+        if not WEB:
+            threading.Thread(target=self.watch, daemon=True).start()
         self.event("ready", {"python": sys.version.split()[0]})
         for line in sys.stdin:
             line = line.strip()
@@ -60,6 +71,9 @@ class Server:
             except json.JSONDecodeError:
                 continue
             method = req.get("method")
+            if WEB and method in DESKTOP_ONLY:
+                self.reply(req, error=f"{method} isn't available in the web tool.")
+                continue
             if method == "preview":
                 self.latest_preview = req["id"]
             if method == "drive":
@@ -117,6 +131,8 @@ class Server:
     # -- methods ------------------------------------------------------------------------------
 
     def rpc_open_generator(self, path):
+        if WEB:
+            path = WEB_GENERATOR
         started = time.time()
         self.gen = V.Generator(path)
         return self.info(time.time() - started)
@@ -136,13 +152,14 @@ class Server:
     def info(self, seconds):
         g = self.gen.module
         return {
-            "path": self.gen.path,
+            "web": WEB,
+            "path": os.path.basename(self.gen.path) if WEB else self.gen.path,
             "materials": self.gen.palette(),
             "variants": list(g.VARIANTS),
             "dirs": list(g.DIRS),
-            "rsiDir": getattr(g, "RSI_DIR", None),
-            "previewDir": getattr(g, "PREVIEW_DIR", None),
-            "repo": self.repo(),
+            "rsiDir": None if WEB else getattr(g, "RSI_DIR", None),
+            "previewDir": None if WEB else getattr(g, "PREVIEW_DIR", None),
+            "repo": None if WEB else self.repo(),
             "wheelFrames": self.gen.wheel_frames,
             "wheelDelay": self.gen.wheel_delay,
             "seconds": round(seconds, 2),
@@ -245,7 +262,15 @@ class Server:
         repo = self.repo()
         return P.damage_types(repo) if repo else {"types": [], "groups": {}}
 
+    def session_file(self, name):
+        """A file in the web session's own folder, named after a path the page sent (its name only)."""
+        name = os.path.basename(str(name).replace("\\", "/")).split(":")[-1] or "file"
+        os.makedirs(WORKDIR, exist_ok=True)
+        return os.path.join(WORKDIR, name)
+
     def rpc_export_voxels(self, project, box, path, materials=None):
+        if WEB:
+            path = self.session_file(path)
         b = V.Box.from_dict(box)
         _, _, per_layer, _ = V.build(project, b, materials or self.gen.materials, ["S"])
         layers = []
@@ -257,36 +282,55 @@ class Server:
         data = {"format": "cmu-open-vehicle-voxels", "version": 1, "box": b.as_dict(), "layers": layers}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(data, fh)
+        if WEB:
+            return {"path": os.path.basename(path), "layers": len(layers), "download": os.path.basename(path)}
         return {"path": path, "layers": len(layers)}
 
     def rpc_game_info(self):
         """The game repo a vehicle is written into by default."""
-        return {"repo": self.repo()}
+        return {"repo": None if WEB else self.repo()}
 
     def rpc_export_game(self, project, box, materials=None, repo=None, model3d=True):
         """The vehicle written into the game (export_game.write): its sprites, crayon map, prototypes
         and strings. Tells the app how far along it is as it goes."""
         import export_game as G
-        repo = repo or self.repo()
+        repo = self.repo() if WEB else repo or self.repo()
         if not repo or not os.path.isdir(os.path.join(repo, "Content.CMU", "Resources")):
             raise ValueError(f"{repo or 'No repo'} isn't a CMU repo (no Content.CMU/Resources).")
         data = {"box": box, "materials": materials or self.gen.materials, "layers": project["layers"],
                 "vehicle": project.get("vehicle") or {}}
         started = time.time()
         say = lambda text: self.event("game_progress", {"text": text})  # noqa: E731
-        result = G.write(self.gen, data, repo, say)
+        # On the web, into a folder of its own laid out as the repo is, zipped up for download.
+        out = None
+        if WEB:
+            import shutil
+            out = os.path.join(WORKDIR, "export")
+            shutil.rmtree(out, ignore_errors=True)
+            os.makedirs(out)
+        result = G.write(self.gen, data, repo, say, out=out)
         # Its 3D model too, for the first person view: read from the sprites just written.
         if model3d:
             import export_3d as E3
             say("Building the 3D model")
             try:
-                r3 = E3.after_game(self.gen, data, repo, result, progress=say)
+                r3 = E3.after_game(self.gen, data, out or repo, result, progress=say)
                 result["model3d"] = r3["path"]
                 result["files"].append(r3["path"])
             except Exception as exc:  # noqa: BLE001 - the 2D vehicle is written whatever happens here
                 result.setdefault("warnings", []).append(f"3D model: {type(exc).__name__}: {exc}")
         result["seconds"] = round(time.time() - started, 1)
         result["repo"] = repo
+        if WEB:
+            say("Packing the zip")
+            import package
+            zipped = package.zip_export(out, result, data, self.session_file(f"{G.names(data['vehicle'])[2]}.zip"))
+            for key in ("rsi", "crayon", "prototypes", "strings", "model3d"):
+                if result.get(key):
+                    result[key] = os.path.relpath(result[key], out).replace(os.sep, "/")
+            result["files"] = [os.path.relpath(f, out).replace(os.sep, "/") for f in result["files"]]
+            result["repo"] = None
+            result["download"] = os.path.basename(zipped)
         return result
 
     def rpc_check(self, project, box, materials=None):
@@ -367,7 +411,7 @@ class Server:
 
     def rpc_list_sounds(self, repo=None):
         """Every sound in the repo's resources, as the game names them (/Audio/...), and its file."""
-        repo = repo or self.repo()
+        repo = self.repo() if WEB else repo or self.repo()
         files = {}
         for root in (os.path.join(repo, "Resources"), os.path.join(repo, "Content.CMU", "Resources")):
             audio = os.path.join(root, "Audio")
@@ -376,6 +420,9 @@ class Server:
                     if n.lower().endswith((".ogg", ".wav", ".mp3")):
                         full = os.path.join(d, n)
                         files["/" + os.path.relpath(full, root).replace(os.sep, "/")] = full
+        # On the web the page plays them from the server, where web.py serves the same folders.
+        if WEB:
+            return {"files": [{"path": k, "file": "/audio" + k} for k in sorted(files)]}
         return {"files": [{"path": k, "file": v} for k, v in sorted(files.items())]}
 
     # -- the vehicle tried in the game ------------------------------------------------------------

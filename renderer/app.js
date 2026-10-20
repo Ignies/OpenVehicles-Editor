@@ -28,7 +28,9 @@ const PRESETS = [
 ];
 const BASE_HEX = '#767e50';
 const TOOL_KEYS = { b: 'pencil', e: 'eraser', g: 'fill', l: 'line', r: 'rect', o: 'ellipse', d: 'depth', i: 'picker' };
-const TABS = ['layers', 'draw', 'paint', 'vehicle', 'generate'];
+const TABS = ['layers', 'draw', 'paint', 'vehicle'];
+// How long after a change the project saves itself into the browser.
+const AUTOSAVE_MS = 2500;
 // Damage types offered first, by what usually marks a vehicle; the rest follow.
 const COMMON_DAMAGE = ['Piercing', 'Blunt', 'Slash', 'Heat', 'Caustic', 'Shock', 'Structural'];
 // The levels a damage state is drawn at: how much of its damage type the part has taken.
@@ -125,10 +127,6 @@ class App {
     api.on('backend:event', (msg) => this.backendEvent(msg));
     api.on('backend:log', (line) => console.debug('[python]', line));
     api.on('file:changed', (path) => this.fileChanged(path));
-    api.on('win:state', ({ maximized }) => {
-      $('[data-win="maximize"] i').dataset.icon = maximized ? 'restore' : 'maximize';
-      mountIcons($('.window-controls'));
-    });
     this.settings = await api.settings.get();
     if (this.settings.woke) document.documentElement.classList.add('woke');
     this.setTab(TABS.includes(this.settings.sideTab) ? this.settings.sideTab : 'layers', true);
@@ -147,8 +145,7 @@ class App {
     this.palette = this.info.materials;
     this.materials = this.palette.map((m) => m.name);
     this.toneCache = {};
-    $('#genPath').textContent = this.info.path;
-    $('#watchText').textContent = `watching ${this.info.path.split(/[\\/]/).pop()}`;
+    $('#watchText').textContent = 'Saved in this browser as you work';
     this.buildSwatches();
     this.previewer.wheelDelay = Math.round((this.info.wheelDelay || 0.1) * 1000);
     api.call('damage_types').then((t) => { this.damageTypes = t; this.renderStages(); }).catch(() => {});
@@ -169,7 +166,6 @@ class App {
   // -- chrome: window, tooltips, toasts ------------------------------------------------------------
 
   setupChrome() {
-    for (const b of $$('[data-win]')) b.addEventListener('click', () => api.win[b.dataset.win]());
     $('#glyph').addEventListener('click', () => this.setWoke(!document.documentElement.classList.contains('woke')));
     for (const b of $$('[data-action]')) b.addEventListener('click', () => this.action(b.dataset.action, b));
     for (const b of $$('[data-clear]')) b.addEventListener('click', () => this.clearView(b.dataset.clear));
@@ -225,11 +221,34 @@ class App {
     if (on) this.scheduleChecks();
     this.dirty = on;
     $('#docDirty').classList.toggle('on', on);
+    clearTimeout(this.autosaveTimer);
+    if (on) this.autosaveTimer = setTimeout(() => this.autosave(), AUTOSAVE_MS);
   }
 
   setFile(path) {
     this.file = path;
-    $('#docName').textContent = path ? path.split(/[\\/]/).pop() : 'untitled';
+    $('#docName').textContent = path ? api.displayName(path) : 'untitled';
+  }
+
+  /** Saves into the browser a little after each change, so closing the tab loses nothing: under its
+   * own name once it has one, else as a new untitled project. */
+  async autosave() {
+    if (!this.dirty || !this.project) return;
+    try {
+      if (!this.file) this.setFile(await api.untitledPath(this.vehicle().name));
+      await api.fs.write(this.file, this.project.toFile());
+      this.setDirty(false);
+      api.settings.set({ lastFile: this.file });
+    } catch (err) {
+      this.toast(`<b>Autosave</b> ${this.escape(this.short(err.message))}`, true, 4000);
+    }
+  }
+
+  /** The project as a .cmuov file, to keep or share outside the browser. */
+  downloadProject() {
+    if (!this.project) return;
+    const name = (this.file ? api.displayName(this.file) : this.vehicle().name || 'vehicle').replace(/[^\w .-]+/g, '_');
+    api.download(`${name}.cmuov`, this.project.toFile(), 'application/json');
   }
 
   // -- segmented controls with a sliding pill --------------------------------------------------------
@@ -368,8 +387,6 @@ class App {
     }
     $('#layerAdd').addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('on'); });
     document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.classList.remove('on'); });
-    $('#genPath').addEventListener('click', () => this.pickGenerator());
-    $('#generateBtn').addEventListener('click', () => this.generate());
   }
 
   /** Auto depth follows the surface drawn on; fixed puts every pixel at the slider's depth. */
@@ -1170,8 +1187,8 @@ class App {
       case 'undo': return this.undo();
       case 'redo': return this.redo();
       case 'resize': return this.resizeBox();
-      case 'open-textures': return this.info?.rsiDir && api.open(this.info.rsiDir);
-      case 'open-previews': return this.info?.previewDir && api.open(this.info.previewDir);
+      case 'save-as': return this.save(true);
+      case 'download': return this.downloadProject();
       default: return null;
     }
   }
@@ -1371,9 +1388,11 @@ class App {
     const { project, extra } = Project.fromFile(text, this.materials);
     await this.refreshNative(project, extra.version);
     if (keep && this.project) project.active = Math.min(this.project.active, project.layers.length - 1);
-    this.setProject(project, path);
-    api.settings.set({ lastFile: path });
-    api.fs.watch(path);
+    // A file from the computer is kept in the browser from then on, under its own name.
+    const stored = path.startsWith('store:') ? path : await api.untitledPath(api.displayName(path));
+    this.setProject(project, stored);
+    if (stored !== path) this.setDirty(true);
+    api.settings.set({ lastFile: stored });
   }
 
   /** A project from before per direction drawings has its layers loaded from the generator brought
@@ -1440,35 +1459,6 @@ class App {
     this.toast(`Exported <b>${this.escape(base.split(/[\\/]/).pop())}.png</b> and its voxels.`);
   }
 
-  async pickGenerator() {
-    const r = await api.dialog.open({ filters: [{ name: 'Python generator', extensions: ['py'] }], properties: ['openFile'] });
-    if (r.canceled || !r.filePaths[0]) return;
-    await api.settings.set({ generator: r.filePaths[0] });
-    await this.openGenerator(r.filePaths[0]);
-  }
-
-  async generate() {
-    const btn = $('#generateBtn');
-    if (this.generating) {
-      if (!btn.dataset.confirm) {
-        btn.dataset.confirm = '1';
-        btn.querySelector('b').textContent = 'Click again to stop';
-        setTimeout(() => { delete btn.dataset.confirm; }, 2000);
-        return;
-      }
-      await api.call('cancel_generate');
-      return;
-    }
-    try {
-      await api.call('generate');
-      this.generating = true;
-      btn.classList.add('running');
-      btn.querySelector('b').textContent = 'Generating…';
-    } catch (err) {
-      this.toast(`<b>Generate</b> ${this.escape(this.short(err.message))}`, true, 5000);
-    }
-  }
-
   // -- the vehicle in the game -------------------------------------------------------------------
 
   // -- driving: stats and sounds ------------------------------------------------------------------
@@ -1516,11 +1506,9 @@ class App {
 
   /** Every sound in the game repo, offered as you type one's path. */
   async loadSoundList() {
-    const repo = await this.gameRepo();
-    if (!repo || this.soundRepo === repo) return;
-    this.soundRepo = repo;
+    if (this.soundFiles) return;
     try {
-      const r = await api.call('list_sounds', { repo });
+      const r = await api.call('list_sounds', {});
       this.soundFiles = r.files;
       const list = $('#soundList');
       list.innerHTML = '';
@@ -1530,7 +1518,7 @@ class App {
 
   async playSound(resPath, btn) {
     const file = this.soundFiles?.find((f) => f.path === resPath)?.file;
-    if (!file) { this.toast(`<b>Sound</b> ${this.escape(resPath)} isn't in the repo`, true, 2400); return; }
+    if (!file) { this.toast(`<b>Sound</b> ${this.escape(resPath)} isn't one the tool has`, true, 2400); return; }
     try {
       this.audio?.pause();
       $$('.sound .play.on').forEach((b) => b.classList.remove('on'));
@@ -1562,7 +1550,8 @@ class App {
       row.querySelector('.pick').addEventListener('click', async () => {
         const r = await api.dialog.open({ filters: [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }], properties: ['openFile'] });
         if (r.canceled || !r.filePaths?.[0]) return;
-        p.refs[view] = { path: r.filePaths[0], opacity: p.refs[view]?.opacity ?? 0.4 };
+        p.refs[view] = { path: api.displayName(r.filePaths[0]), data: await api.fs.readDataUrl(r.filePaths[0]),
+          opacity: p.refs[view]?.opacity ?? 0.4 };
         this.setDirty(true);
         this.renderRefs();
       });
@@ -1588,10 +1577,11 @@ class App {
     const ref = this.project.refs[view];
     vc.stage.style.setProperty('--ref-opacity', ref?.opacity ?? 0.4);
     if (!ref) { vc.ref.classList.remove('on'); vc.refPath = null; return; }
-    if (vc.refPath === ref.path) { vc.ref.classList.add('on'); return; }
-    vc.refPath = ref.path;
+    const key = ref.data ? ref.data.length + ref.path : ref.path;
+    if (vc.refPath === key) { vc.ref.classList.add('on'); return; }
+    vc.refPath = key;
     try {
-      vc.ref.src = await api.fs.readDataUrl(ref.path);
+      vc.ref.src = ref.data || await api.fs.readDataUrl(ref.path);
       vc.ref.classList.add('on');
     } catch {
       vc.ref.classList.remove('on');
@@ -1642,28 +1632,11 @@ class App {
       this.setDirty(true);
       this.renderDriving();
     });
-    $('#testBtn').addEventListener('click', () => this.testGame());
-    $('#lintBtn').addEventListener('click', () => this.lint());
-    $('#commitBtn').addEventListener('click', (e) => this.commit(e.currentTarget));
-    $('#respawnBtn').addEventListener('click', () => this.spawnInGame());
-    $('#stopGameBtn').addEventListener('click', () => api.call('game_stop').then(() => this.pollGame()));
-    $('#gameRepo').addEventListener('click', async () => {
-      const r = await api.dialog.open({ properties: ['openDirectory'], title: 'The CMU repo to write into' });
-      if (r.canceled || !r.filePaths?.[0]) return;
-      this.settings = await api.settings.set({ gameRepo: r.filePaths[0] });
-      this.renderGame();
-    });
-  }
-
-  async gameRepo() {
-    if (this.settings?.gameRepo) return this.settings.gameRepo;
-    if (this.defaultRepo === undefined) this.defaultRepo = (await api.call('game_info').catch(() => null))?.repo || null;
-    return this.defaultRepo;
   }
 
   /** The file's name, as the vehicle's id and name until they're given. */
   fileSlug() {
-    return (this.file || 'vehicle').split(/[\\/]/).pop().replace(/\.cmuov$/i, '');
+    return this.file ? api.displayName(this.file) : 'vehicle';
   }
 
   renderGame() {
@@ -1715,7 +1688,6 @@ class App {
     });
     mountIcons(list);
     this.scheduleChecks();
-    this.gameRepo().then((repo) => { $('#gameRepo').textContent = repo || 'Pick the CMU repo'; });
     for (const view of Object.values(this.views)) view.paintOverlay();
   }
 
@@ -1734,7 +1706,6 @@ class App {
         + r.warnings.map((w) => `<div class="wrn">${this.escape(w)}</div>`).join('')
         || '<div class="ok">Ready for the game.</div>';
       $('#gameBtn').disabled = r.errors.length > 0;
-      $('#testBtn').disabled = r.errors.length > 0;
     } catch { /* the check is a help, not a gate */ }
   }
 
@@ -1769,181 +1740,56 @@ class App {
     return true;
   }
 
-  async lint() {
-    const repo = await this.gameRepo();
-    const btn = $('#lintBtn');
-    if (btn.classList.contains('running')) return;
-    try {
-      await api.call('lint', { repo });
-      btn.classList.add('running');
-      this.lintStarted = Date.now();
-      const tick = () => {
-        if (!btn.classList.contains('running')) return;
-        btn.lastChild.textContent = `Linting… ${Math.round((Date.now() - this.lintStarted) / 1000)}s`;
-        setTimeout(tick, 1000);
-      };
-      tick();
-    } catch (err) {
-      this.toast(`<b>Lint</b> ${this.escape(this.short(err.message))}`, true, 5000);
-    }
-  }
-
-  lintDone(data) {
-    const btn = $('#lintBtn');
-    btn.classList.remove('running');
-    btn.lastChild.textContent = 'Lint';
-    const out = $('#written');
-    const mine = data.errors.filter((e) => /CMUOpenVehicles|CMUVehicle/.test(e));
-    const other = data.errors.length - mine.length;
-    out.insertAdjacentHTML('beforeend', mine.length
-      ? mine.map((e) => `<div class="bad">${this.escape(e.replace(/^::error /, ''))}</div>`).join('')
-      : `<div class="ok">Linted in ${data.seconds}s: nothing wrong with the vehicle${other ? ` (${other} error${other > 1 ? 's' : ''} elsewhere in the repo)` : ''}</div>`);
-  }
-
-  /** Commits the files written: the first click says where, the second commits. */
-  async commit(btn) {
-    const repo = await this.gameRepo();
-    const files = this.lastWritten?.files;
-    if (!files) return;
-    const rel = files.map((f) => f.slice(repo.length + 1).replace(/\\/g, '/'));
-    if (!btn.dataset.armed) {
-      const st = await api.call('git_state', { repo, files: rel });
-      if (!st.changed.length) { this.toast('Nothing new to commit.', false, 1800); return; }
-      btn.dataset.armed = '1';
-      btn.lastChild.textContent = `Commit to ${st.branch}?`;
-      setTimeout(() => { delete btn.dataset.armed; btn.lastChild.textContent = 'Commit'; }, 3500);
-      return;
-    }
-    delete btn.dataset.armed;
-    btn.lastChild.textContent = 'Commit';
-    const name = this.lastWritten.name || 'vehicle';
-    try {
-      const r = await api.call('commit', { repo, files: rel, message: `Added the ${name} open vehicle` });
-      this.toast(`Committed <b>${r.commit}</b> to <b>${this.escape(r.branch)}</b>.`, false, 3000);
-    } catch (err) {
-      this.toast(`<b>Commit</b> ${this.escape(this.short(err.message))}`, true, 6000);
-    }
-  }
-
-  /** Writes the vehicle, starts the test game if it isn't running, and spawns it beside the tester
-   * once they've joined. With the game already up, the new prototypes and sprites are picked up as
-   * they're written, and the vehicle spawned again. */
-  async testGame() {
-    const written = await this.writeGame();
-    if (!written) return;
-    this.gameProto = written.id;
-    try {
-      const st = await api.call('game_start', { repo: written.repo });
-      this.spawnWhenReady = true;
-      this.showGame(st);
-      this.pollGame();
-    } catch (err) {
-      this.toast(`<b>Test game</b> ${this.escape(this.short(err.message))}`, true, 6000);
-    }
-  }
-
-  async spawnInGame() {
-    if (!this.gameProto) return;
-    try {
-      await api.call('game_spawn', { proto: this.gameProto });
-      this.toast(`Spawned <b>${this.escape(this.gameProto)}</b> beside you.`, false, 2000);
-    } catch (err) {
-      this.toast(`<b>Spawn</b> ${this.escape(this.short(err.message))}`, true, 4000);
-    }
-  }
-
-  /** Follows the test game while it runs: loading, then ready (spawning the vehicle the first time). */
-  async pollGame() {
-    clearTimeout(this.gameTimer);
-    let st;
-    try { st = await api.call('game_status'); } catch { st = { state: 'stopped' }; }
-    this.showGame(st);
-    if (st.state === 'ready' && this.spawnWhenReady) {
-      this.spawnWhenReady = false;
-      setTimeout(() => this.spawnInGame(), 4000);
-    }
-    if (st.state !== 'stopped') this.gameTimer = setTimeout(() => this.pollGame(), 2000);
-  }
-
-  showGame(st) {
-    const el = $('#gameStatus');
-    el.className = `game-status ${st.state}${st.errors?.length ? ' error' : ''}`;
-    const text = { stopped: 'Test game not running', loading: `Loading the game… ${st.seconds || 0}s`,
-      ready: `In game as ${st.user}${this.gameProto ? ` · ${this.gameProto}` : ''}` }[st.state] || st.state;
-    el.querySelector('.txt').textContent = st.errors?.length ? `${text} · ${st.errors[st.errors.length - 1]}` : text;
-    el.dataset.tip = (st.log || []).slice(-6).join('\n') || '';
-    $('#respawnBtn').disabled = st.state !== 'ready' || !this.gameProto;
-    $('#stopGameBtn').disabled = st.state === 'stopped';
-  }
-
   async writeGame() {
     const btn = $('#gameBtn');
     if (btn.classList.contains('running')) return null;
-    const repo = await this.gameRepo();
-    if (!repo) { this.toast('Pick the CMU repo to write into first.', true); return null; }
     const p = this.project;
     const v = { ...(p.vehicle || {}) };
     v.name ||= $('#vehName').placeholder;
     v.id ||= $('#vehId').placeholder;
-    if (this.file) v.source = this.file.split(/[\\/]/).pop();
+    if (this.file) v.source = `${api.displayName(this.file)}.cmuov`;
     if (!(v.seats || []).some((s) => s.driver)) { this.toast('Give it a seat that <b>drives</b> first.', true, 2600); return null; }
     btn.classList.add('running');
     const label = btn.querySelector('b');
-    label.textContent = 'Writing…';
+    label.textContent = 'Rendering…';
     btn.querySelector('.fill').style.transform = 'scaleX(0.15)';
     $('#written').innerHTML = '';
     try {
-      const r = await api.call('export_game', { project: { ...p.toBackend(), vehicle: v }, box: p.box, materials: this.materials, repo });
+      const r = await api.call('export_game', { project: { ...p.toBackend(), vehicle: v }, box: p.box, materials: this.materials });
       const out = $('#written');
-      out.innerHTML = `<div class="ok">${this.escape(r.id)} written · ${r.states} sprite states · ${r.seconds}s</div>`;
+      out.innerHTML = `<div class="ok">${this.escape(r.download)} · ${r.states} sprite states · ${r.seconds}s</div>`
+        + '<p class="note">Unzip it at the root of the CMU repo; its INSTALL.md says the rest.</p>';
       for (const f of r.files) {
-        const b = document.createElement('button');
-        b.textContent = f;
-        b.dataset.tip = 'Show it';
-        b.addEventListener('click', () => api.open(f.replace(/[\\/][^\\/]*\.(yml|ftl|png)$/i, '')));
-        out.append(b);
+        const row = document.createElement('div');
+        row.className = 'file';
+        row.textContent = f;
+        out.append(row);
       }
       this.lastWritten = { ...r, name: v.name };
-      $('#commitBtn').disabled = false;
       for (const w of r.warnings || []) out.insertAdjacentHTML('beforeend', `<div class="warn">${this.escape(w)}</div>`);
-      this.toast(`<b>${this.escape(r.id)}</b> is in the game.`, false, 3000);
+      this.toast(`Downloading <b>${this.escape(r.download)}</b>.`, false, 3000);
       return r;
     } catch (err) {
       $('#written').innerHTML = `<div class="bad">${this.escape(this.short(err.message))}</div>`;
-      this.toast(`<b>Into the game</b> ${this.escape(this.short(err.message))}`, true, 6000);
+      this.toast(`<b>For the game</b> ${this.escape(this.short(err.message))}`, true, 6000);
       return null;
     } finally {
       btn.classList.remove('running');
       btn.querySelector('.fill').style.transform = 'scaleX(0)';
-      label.textContent = 'Write into the game';
+      label.textContent = 'Download for the game';
     }
   }
 
   // -- backend events --------------------------------------------------------------------------------
 
   backendEvent({ event, data }) {
-    if (event === 'lint') { this.lintDone(data); return; }
     if (event === 'game_progress') {
       const btn = $('#gameBtn');
       btn.querySelector('b').textContent = `${data.text}…`;
       btn.querySelector('.fill').style.transform = `scaleX(${data.text.startsWith('Writing') ? 0.85 : 0.4})`;
       return;
     }
-    if (event === 'generate') {
-      const btn = $('#generateBtn');
-      if (data.state === 'running') {
-        const pct = Math.min(99, Math.round((data.files / data.total) * 100));
-        btn.querySelector('.fill').style.transform = `scaleX(${pct / 100})`;
-        btn.querySelector('b').textContent = btn.dataset.confirm ? 'Click again to stop' : `Generating… ${pct}% · ${Math.round(data.seconds)}s`;
-        return;
-      }
-      this.generating = false;
-      btn.classList.remove('running');
-      btn.querySelector('.fill').style.transform = 'scaleX(0)';
-      btn.querySelector('b').textContent = 'Generate art';
-      if (data.state === 'done') this.toast(`<b>Art generated</b> in ${Math.round(data.seconds)}s.`, false, 4000);
-      else this.toast(`<b>Generator stopped</b> ${this.escape((data.output || '').trim().split('\n').pop() || `(exit ${data.code})`)}`, true, 6000);
-    } else if (event === 'generator') {
+    if (event === 'generator') {
       if (data.state === 'reloaded') {
         this.palette = data.materials;
         this.materials = this.palette.map((m) => m.name);
@@ -1957,9 +1803,12 @@ class App {
       } else {
         this.toast(`<b>Generator error</b> ${this.escape(data.error)}`, true, 7000);
       }
+    } else if (event === 'busy') {
+      this.setBackend('error', 'Server full');
+      this.toast(`<b>The server is full</b> (${data.max} people at once). Try again in a while.`, true, 15000);
     } else if (event === 'exit') {
-      this.setBackend('error', 'Python stopped');
-      this.toast('<b>The Python backend stopped.</b> Restart the tool.', true, 8000);
+      this.setBackend('error', 'Disconnected');
+      this.toast('<b>Lost the connection to the server.</b> Your work is saved in this browser: reload the page.', true, 15000);
     }
   }
 

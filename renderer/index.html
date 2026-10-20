@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+        content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMU Open Vehicles</title>
+  <link rel="icon" href="cmu.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -20,14 +22,11 @@
     <div class="title-actions">
       <div class="add-wrap new-wrap"><button class="ghost" id="newBtn" data-tip="New vehicle: blank or from a template">New</button>
         <div class="menu new-menu" id="newMenu"></div></div>
-      <button class="ghost" data-action="open" data-tip="Open a drawing (Ctrl+O)">Open</button>
-      <button class="ghost" data-action="save" data-tip="Save (Ctrl+S)">Save</button>
-      <button class="ghost" data-action="export" data-tip="Export the four sprites and the voxels">Export</button>
-    </div>
-    <div class="window-controls">
-      <button class="wc" data-win="minimize" aria-label="Minimize"><i data-icon="minimize"></i></button>
-      <button class="wc" data-win="maximize" aria-label="Maximize"><i data-icon="maximize"></i></button>
-      <button class="wc close" data-win="close" aria-label="Close"><i data-icon="close"></i></button>
+      <button class="ghost" data-action="open" data-tip="Open a vehicle saved in this browser, or a .cmuov file (Ctrl+O)">Open</button>
+      <button class="ghost" data-action="save" data-tip="Save in this browser (Ctrl+S); it also saves itself as you work">Save</button>
+      <button class="ghost" data-action="save-as" data-tip="Save a copy under another name (Ctrl+Shift+S)">Save as</button>
+      <button class="ghost" data-action="download" data-tip="Download the project as a .cmuov file, to keep or share">Download</button>
+      <button class="ghost" data-action="export" data-tip="Download the four sprites and the voxels">Export</button>
     </div>
   </header>
 
@@ -105,7 +104,6 @@
       <button class="tab" role="tab" data-tab="draw" data-tip="Materials and brush  Ctrl+2"><span>Draw</span></button>
       <button class="tab" role="tab" data-tab="paint" data-tip="Paint and dirt  Ctrl+3"><span>Paint</span></button>
       <button class="tab" role="tab" data-tab="vehicle" data-tip="Vehicle and its shape  Ctrl+4"><span>Vehicle</span></button>
-      <button class="tab" role="tab" data-tab="generate" data-tip="Generate the art  Ctrl+5"><span>Generate</span></button>
     </nav>
 
     <div class="side-main">
@@ -259,34 +257,12 @@
             <div class="seats-head"><span>Seats</span><button class="mini" id="addSeat">Add seat</button></div>
             <div class="seats" id="seats"></div>
             <p class="note">Place a seat, then click where its rider sits on the Top view (or the Side or Left view for its height). A door opens to let its rider in and out.</p>
-            <div class="gen-path" id="gameRepo" data-tip="The game repo it's written into"></div>
             <div class="checks" id="checks"></div>
-            <button class="btn primary progress" id="gameBtn"><span class="fill"></span><span class="txt"><i data-icon="write"></i><b>Write into the game</b></span></button>
-            <div class="row">
-              <button class="btn subtle" id="testBtn" data-tip="Write it, start the test game if it isn't running, and spawn it beside you"><i data-icon="play"></i>Test in game</button>
-              <button class="btn subtle icon-only" id="respawnBtn" data-tip="Spawn it again beside you" disabled><i data-icon="redo"></i></button>
-              <button class="btn subtle icon-only" id="stopGameBtn" data-tip="Close the test game" disabled><i data-icon="close"></i></button>
-            </div>
-            <div class="row">
-              <button class="btn subtle" id="lintBtn" data-tip="Run the repo's YAML linter on what's written (a few minutes)"><i data-icon="check"></i>Lint</button>
-              <button class="btn subtle" id="commitBtn" data-tip="Commit the files written, and only them" disabled><i data-icon="stage"></i>Commit</button>
-            </div>
-            <div class="game-status" id="gameStatus"><span class="dot"></span><span class="txt">Test game not running</span></div>
+            <button class="btn primary progress" id="gameBtn" data-tip="Render every sprite the game needs and download them, with its prototypes and strings, as a zip for the CMU repo"><span class="fill"></span><span class="txt"><i data-icon="write"></i><b>Download for the game</b></span></button>
             <div class="written" id="written"></div>
           </section>
         </div>
 
-        <div class="tab-panel" role="tabpanel" data-panel="generate">
-          <section class="card">
-            <header class="card-head"><span>Generate</span></header>
-            <div class="gen-path" id="genPath" data-tip="Change the generator script"></div>
-            <button class="btn primary progress" id="generateBtn"><span class="fill"></span><span class="txt"><i data-icon="spark"></i><b>Generate art</b></span></button>
-            <div class="row">
-              <button class="btn subtle" data-action="open-textures"><i data-icon="folder"></i>Textures</button>
-              <button class="btn subtle" data-action="open-previews"><i data-icon="folder"></i>Previews</button>
-            </div>
-          </section>
-        </div>
       </div>
     </div>
   </aside>
@@ -301,6 +277,7 @@
 </div>
 <div class="toasts" id="toasts"></div>
 <div class="tip" id="tip"></div>
+<script src="web-bridge.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

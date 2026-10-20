@@ -869,21 +869,36 @@ def overflow_text(over):
                      for v, sides in over.items())
 
 
+# A panel's states while swung open or swinging (a tailgate dropped behind the vehicle): these may
+# run off the frame, which only cuts the panel off at the edge.
+SWUNG = re.compile(r"_(open|opening|closing)(_overlay)?$")
+
+
 def check_canvas(states):
-    """Raises if any state runs off its frame, naming each direction and how far; returns warnings
-    for drawings that reach its edge, where their hover outline is cut off."""
-    over = overflow(states)
+    """Raises if any state of the vehicle as it stands runs off its frame, naming each direction and
+    how far. A panel swung open past the edge only warns: the frame cuts it off there, and the vehicle
+    itself still fits. Also warns for drawings that reach the edge, where their hover outline is cut
+    off."""
+    swung = {n for n in states if SWUNG.search(n)}
+    standing = {n: st for n, st in states.items() if n not in swung}
+    over = overflow(standing)
     if over:
         raise ValueError(f"The vehicle doesn't fit its {SIZE} px sprite frame ({overflow_text(over)}). The game "
                          f"draws open vehicles in {SIZE} px frames (its crayon map, paint shader and the riders' "
                          f"depth assume it): make it smaller in the directions named, or move it in its box.")
-    edge = overflow(states, 1)
+    warnings = []
+    cut = overflow({n: states[n] for n in swung})
+    if cut:
+        parts = sorted({SWUNG.sub("", n).removeprefix("click_") for n in swung if overflow({n: states[n]})})
+        warnings.append(f"Swung open, the {', '.join(parts)} runs off the {SIZE} px frame ({overflow_text(cut)}), "
+                        "so the game cuts it off at the edge. Shorten it, or move the vehicle in its box, to keep it whole.")
+    edge = overflow(standing, 1)
     if edge:
         words = {"S": "South", "N": "North", "E": "East", "W": "West"}
         where = "; ".join(f"{words[v]}: the {' and '.join(sides)} edge" for v, sides in edge.items())
-        return [f"The vehicle touches the edge of its {SIZE} px frame, which cuts off its hover outline "
-                f"there ({where})."]
-    return []
+        warnings.append(f"The vehicle touches the edge of its {SIZE} px frame, which cuts off its hover outline "
+                        f"there ({where}).")
+    return warnings
 
 
 def write_rsi(path, states, copyright_text, skip=("crayon_map",)):

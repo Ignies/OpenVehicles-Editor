@@ -49,10 +49,9 @@ MATERIALS = [
 # Every template keeps inside these, so its sprites fit the game's 96 pixel canvas in every
 # direction (the side views stretch the length by 1.25, the front and back views add the length to
 # the height).
-MAX_BOX = (76, 44, 34)
 
 # Each template's own box: length, width, height.
-BOXES = {"car": (70, 38, 26), "pickup": (76, 42, 32), "van": (74, 42, 34), "jeep-like": (68, 40, 32)}
+BOXES = {"car": (70, 38, 26), "pickup": (72, 42, 32), "van": (74, 42, 34), "jeep-like": (68, 40, 32)}
 
 
 # -- wheels ---------------------------------------------------------------------------------------
@@ -820,8 +819,9 @@ EXAMPLES = {
 
 def make(name, box=None):
     """A new project from a template, as a dict (save it with project.save). Box, if given ((length,
-    width, height), a dict or a voxels.Box), puts the same layout in a box of that size; within
-    MAX_BOX every sprite direction fits the game's canvas. An example is its project as saved."""
+    width, height), a dict or a voxels.Box), puts the same layout in a box of that size; whether it
+    still fits the game's 96 px frame depends on its shape, which the game export checks
+    (tools/check_templates.py checks every template as it comes). An example is its project as saved."""
     if name in EXAMPLES:
         import project as P
         return P.load(EXAMPLES[name][0])

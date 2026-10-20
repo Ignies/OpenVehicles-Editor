@@ -1,17 +1,25 @@
 # CMU Open Vehicles
 
 Draw an open vehicle in orthographic views; see its game sprites live, turning, with the game's hover
-outlines and opening doors. Built with Electron, rendered by the CMU vehicle generator in Python.
+outlines and opening doors; download it as a zip that goes straight into the CMU repo. A web app:
+the page runs in any browser, and each tab gets its own Python backend on the server, rendering with
+the CMU vehicle generator.
 
-## Run
+## Run it yourself
 
 ```
-npm start
+pip install numpy Pillow aiohttp
+python tools/snapshot.py C:\path\to\your\CMU\checkout   # the bit of the repo the tool needs, into gamedata/
+python backend/web.py                                    # then open http://localhost:8080
 ```
 
-Needs Python 3.12 with `numpy` and `Pillow` on the PATH (or set `CMUOV_PYTHON`), and the CMU repo: the
-generator defaults to `C:\cmu\jeeps\Content.CMU\Design\Vehicles\JeepPixelArt\jeep_pixel_art.py`
-(change it from the Generate card).
+`gamedata.txt` lists that bit of the repo: the generator, the jeep's sprites, the damage types, the
+vehicle sounds and two files that say which game features the repo has. To host it for others, see
+**Hosting** below.
+
+Projects are kept in the browser that made them (**Save**, and they save themselves as you work);
+**Open** lists them, or opens a `.cmuov` from the computer, and **Download** gives you the `.cmuov`
+to keep or share.
 
 ## How it works
 
@@ -206,12 +214,11 @@ layer at a time.
 
 **Vehicle › In the game**: the vehicle's id, name, description and seats (click a seat's place, then
 where its rider sits on the views), **Driving** (top speed, hull, fuel, crash damage and every sound,
-each playable), a live check of what would stop it going in, then **Write into the game** (sprites,
-crayon map, prototypes, strings and its CMU3D model, `backend/export_3d.py`, under
-`CMUOpenVehicles/`). **Test in game** writes it, starts the repo's test server and a client (the jeep
-harness's `server.toml`, `backend/gametest.py`) and spawns it beside you; with the game running, write
-again and spawn it again to see the change. **Lint** runs the repo's YAML linter, **Commit** commits
-the files written and nothing else (a second click confirms the branch).
+each playable), a live check of what would stop it going in, then **Download for the game**: a zip
+of its sprites, crayon map, prototypes, strings and CMU3D model (`backend/export_3d.py`), laid out
+under `CMUOpenVehicles/` as in the repo, with the project and an `INSTALL.md`. Unzip it at the repo's
+root. (`cmuov.py game` still writes straight into a checkout, and `backend/gametest.py` can start
+the repo's test server from a script.)
 
 ## Writing it into the game
 

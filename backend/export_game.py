@@ -486,9 +486,11 @@ def borrow_effects(repo, states, engine_id):
 
 # -- writing it -----------------------------------------------------------------------------------
 
-def write(gen, project, repo, progress=None):
+def write(gen, project, repo, progress=None, out=None):
     """Writes everything into the repo and returns what it wrote. Raises ValueError with check()'s
-    errors, or when the drawing runs off its sprite frame."""
+    errors, or when the drawing runs off its sprite frame. With out, the files go into that folder,
+    laid out as the repo is, and the repo is only read (which game features it has, the jeep's
+    effects): how the web tool builds the zip it hands out."""
     say = progress or (lambda text: None)
     report = check(project)
     if report["errors"]:
@@ -505,7 +507,7 @@ def write(gen, project, repo, progress=None):
     ids = {n: X.part_id(lay) for n, lay in enumerate(layers)}
     by_name = {lay["name"]: n for n, lay in enumerate(layers)}
     seats = veh.get("seats", [])
-    where = paths(repo, ident, slug)
+    where = paths(out or repo, ident, slug)
     # The working tree's paint component maps each wheel layer to its slot; before rim designs it
     # listed them.
     paint_cs = "Content.CMU/Shared/Vehicle/Open/CMUVehiclePaintComponent.cs"
