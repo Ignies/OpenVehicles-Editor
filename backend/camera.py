@@ -3,8 +3,9 @@
 A project's camera (project["camera"], or its vehicle block's "camera") is one of:
 
     {"mode": "generator"}                 the generator's own views, as the jeep is drawn (the default)
-    {"mode": "single", "view": "S"}       one direction's view drawn for all four: the vehicle looks
-                                          the same whichever way it faces
+    {"mode": "single", "view": "S"}       one direction's view, turned a quarter at a time so the vehicle
+                                          points the way each direction faces (the view's own direction
+                                          is the way its picture points: S down, N up, E right, W left)
     {"mode": "custom", "dirs": {"S": {"pitch": 64, "yaw": 0, "zoom": 1.16, "stretch": 1}, ...}}
                                           a camera of its own per direction: how far above the horizon
                                           it looks down (pitch, degrees), how far the vehicle is turned
@@ -14,7 +15,7 @@ A project's camera (project["camera"], or its vehicle block's "camera") is one o
                                           generator's look (default_dirs)
     {"mode": "sprite", "nose": "N"}       a picture drawn as a finished sprite (sprite.py): seen from
                                           straight above, a voxel a pixel, the nose pointing the way
-                                          given, the same whichever way it faces
+                                          given, turned to point the way each direction faces
 
 The generator draws with a hand tuned oblique projection per direction (generator.render); a custom
 camera draws with an orthographic one of its own (raycast), into the same buffer the generator's
@@ -32,6 +33,10 @@ import numpy as np
 
 DIRS = "SNEW"
 MODES = ("generator", "single", "custom", "sprite")
+# The way a picture points on screen, a clockwise quarter turn at a time.
+CLOCKWISE = "NESW"
+# The game's sprite frame, which a one view picture turns about the middle of.
+FRAME = 96
 # The sprite camera: straight down, a voxel a pixel.
 TOP_DOWN = {"pitch": 90.0, "yaw": 0.0, "zoom": 1.0, "stretch": 1.0}
 # The way a vehicle facing each direction points, on the map (x east, y north).
@@ -58,8 +63,14 @@ class Camera:
 
     @property
     def one(self):
-        """Whether every direction draws the same picture."""
+        """Whether every direction is one picture, turned."""
         return self.mode in ("single", "sprite")
+
+    def turns(self, direction):
+        """Clockwise quarter turns from the picture to a direction's: none unless one()."""
+        if not self.one:
+            return 0
+        return (CLOCKWISE.index(direction) - CLOCKWISE.index(self.view)) % 4
 
     def letter(self, direction):
         """The view a direction is drawn with: its own, or the single view's (a sprite's nose)."""
@@ -261,9 +272,30 @@ def render(gen, direction, model, parts=None):
     return gen.module.render(model, cam.letter(direction), parts)
 
 
+def turn_pixel(x, y, turns, size=FRAME):
+    """A pixel of a size square frame, turned clockwise about its middle that many quarters."""
+    for _ in range(turns % 4):
+        x, y = size - 1 - y, x
+    return x, y
+
+
+def turn_pixels(pixels, turns, size=FRAME):
+    """{(x, y): value} turned as turn_pixel turns each."""
+    if not turns % 4:
+        return pixels
+    return {turn_pixel(x, y, turns, size): v for (x, y), v in pixels.items()}
+
+
 def project(gen, direction, f, r, z):
-    """Where a point in vehicle space lands on a direction's drawing, before dy()."""
+    """Where a point in vehicle space lands on a direction's drawing, before dy(): a one view
+    picture's point turned with it."""
     cam = of(gen)
+    turns = cam.turns(direction)
+    if turns:
+        x, y = project(gen, cam.view, f, r, z)
+        d = dy(gen, direction)
+        x, y = turn_pixel(x + FRAME // 2, y + FRAME // 2 + d, turns)
+        return x - FRAME // 2, y - FRAME // 2 - d
     if cam.custom(direction):
         x, y, _ = Axes(params(gen, cam, direction), cam.letter(direction)).screen([f, r, z])
         return float(x), float(y)

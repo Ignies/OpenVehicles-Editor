@@ -504,8 +504,8 @@ def render_states(gen, project, seats=None):
 
     cam = C.resolve(project, box)
     with V.styled(gen, project, box):
-        # A vehicle that looks the same whichever way it faces is drawn once, for all four.
-        for view in DIRS[:1] if cam.one else DIRS:
+        # A vehicle drawn from one view is drawn once, in that view, then turned to each direction.
+        for view in cam.view if cam.one else DIRS:
             riders = Riders(gen, seats, view)
             vox, owner, per_layer = build(gen, project, box, view)
             closed = Scene(gen, vox, owner, view)
@@ -824,12 +824,13 @@ def render_states(gen, project, seats=None):
                             255 if a >= g.PAINT_MIN_ALPHA else a)
             add("wreck", view, [burnt])
 
-    if cam.one:
-        for st in states.values():
-            st["frames"] = {v: st["frames"][DIRS[0]] for v in DIRS}
     if cam.mode == "sprite":
         import sprite as S
         S.recolour(states, project, ids, role, g, MASK_ALPHA)
+    if cam.one:
+        for st in states.values():
+            own = st["frames"][cam.view]
+            st["frames"] = {v: [C.turn_pixels(f, cam.turns(v)) for f in own] for v in DIRS}
 
     # A wheel kit on road tyres looks the same here: the tool draws one tyre.
     for k in kits:

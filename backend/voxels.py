@@ -1310,6 +1310,14 @@ def render_sprite(gen, view, vox, owner, colours=None, phase=0.0, wheels=None, k
         mask[Y, X] = False
         if keys is not None:
             keys[Y, X] = e[4]
+    # A one view picture turned to point the way this direction faces, about the frame's middle.
+    turns = C.of(gen).turns(view)
+    if turns:
+        img = img.rotate(-90 * turns)
+        parts = np.ascontiguousarray(np.rot90(parts, -turns))
+        mask = np.ascontiguousarray(np.rot90(mask, -turns))
+        if keys is not None:
+            keys[:] = np.rot90(keys, -turns, axes=(0, 1)).copy()
     return (img, parts, mask) if wheels is not None else (img, parts)
 
 

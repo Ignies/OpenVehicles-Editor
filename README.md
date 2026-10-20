@@ -128,8 +128,9 @@ Stretch scales every drawing with it) and **Generate**. Ctrl+1 to 5 switch them.
 
 The Vehicle tab's **Camera** card sets how each sprite direction sees the vehicle: **Game's views**
 (the generator's, as the jeep is drawn), **Custom** (pitch, yaw, zoom and stretch per direction) or
-**One view** (one direction's picture for all four: it looks the same whichever way it faces, and
-crayons go on what that view shows). A one view vehicle needs the game's crayon `fixedDirection`.
+**One view** (one direction's picture, turned a quarter at a time to point the way each direction
+faces; crayons go on what that view shows). A one view vehicle needs the game's crayon
+`fixedDirection`; an imported sprite doesn't.
 
 ### Importing a finished sprite
 
@@ -145,7 +146,7 @@ above, and the way its front points in the picture. Its layers by name:
 | `door_driver`, `door_passenger`, `hood`, `tailgate`, `boot`, `hatch`, `fuel_door` | Panels, each with `_open` for its look opened |
 | `headlight_left`, `taillight_right`, `signal_left`, `searchlight`, ... | Lamps |
 
-The picture is used as drawn, for all four directions; the tool presses each layer into a block for
+The picture is used as drawn, turned to point the way each direction faces; the tool presses each layer into a block for
 the hull, clicks, seats and crayon map. The board shows the picture alone: pick a seat in the Seats
 card and click where its rider sits. **4 dir workspace** on the Camera card shows the blocks.
 

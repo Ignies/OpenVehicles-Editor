@@ -109,12 +109,12 @@ def zip_export(out, result, project, zip_path):
 
 
 def single_note(veh):
-    """For a vehicle drawn the same at every heading: the crayon's fixedDirection it needs."""
-    if (veh.get("camera") or {}).get("mode") not in ("single", "sprite"):
+    """For one of the generator's views turned to each heading: the crayon's fixedDirection it needs."""
+    if (veh.get("camera") or {}).get("mode") != "single":
         return ""
-    return ("\n\nIt is drawn the same whichever way it faces, so its crayon map has one view: the game's\n"
-            "`CMUVehicleCrayon` must know `fixedDirection` (the single view crayon change). Without it\n"
-            "the YAML linter rejects the field.")
+    return ("\n\nIt is one view turned to each heading, so the panel faces it shows are that view's at every\n"
+            "heading: the game's `CMUVehicleCrayon` must know `fixedDirection` (the one view crayon\n"
+            "change). Without it the YAML linter rejects the field.")
 
 
 def install_text(result, veh, slug, out):

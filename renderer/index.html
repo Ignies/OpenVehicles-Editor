@@ -245,14 +245,14 @@
           <section class="card" id="cameraCard">
             <header class="card-head"><span>Camera</span><button class="mini" id="cameraReset" data-tip="Back to the game's own views">Game's</button></header>
             <div class="segmented wide" id="cameraMode">
-              <button data-value="generator" class="on" data-tip="Each direction drawn as the jeep is">Game's views</button><button data-value="custom" data-tip="A camera of your own for each direction">Custom</button><button data-value="single" data-tip="One direction's view for all four: it looks the same whichever way it faces">One view</button>
+              <button data-value="generator" class="on" data-tip="Each direction drawn as the jeep is">Game's views</button><button data-value="custom" data-tip="A camera of your own for each direction">Custom</button><button data-value="single" data-tip="One direction's view, turned to point the way each direction faces">One view</button>
             </div>
             <div class="camera-sprite" id="cameraSprite" hidden>
               <span id="cameraNose"></span>
               <button class="toggle-mini wide" id="cameraFourDir" data-tip="Show every view of the blocks it is pressed into">4 dir workspace</button>
             </div>
             <div class="camera-single" id="cameraSingle" hidden>
-              <span>Draw all four as</span>
+              <span>Turn this view</span>
               <div class="segmented" id="cameraView"><button data-value="S" class="on">Front</button><button data-value="N">Back</button><button data-value="E">Right</button><button data-value="W">Left</button></div>
             </div>
             <div class="camera-dirs" id="cameraDirs" hidden></div>

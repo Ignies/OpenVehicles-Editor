@@ -1257,7 +1257,7 @@ class App {
       menu.append(b);
     };
     add('Blank', 'A body to draw from scratch.', () => this.newProject());
-    if (api.importDialog) add('Import a sprite…', 'An Aseprite file or PNGs, drawn from above: one picture for all four directions.', () => this.importSprite());
+    if (api.importDialog) add('Import a sprite…', 'An Aseprite file or PNGs, drawn from above: one picture, turned to each direction.', () => this.importSprite());
     menu.insertAdjacentHTML('beforeend', '<div class="menu-sep"></div><div class="menu-label">From a template</div>');
     const title = (n) => n[0].toUpperCase() + n.slice(1).replace(/-/g, ' ');
     try {
@@ -1297,7 +1297,7 @@ class App {
   }
 
   /** A new project from a finished sprite (backend/sprite.py): its layers' pictures drawn as they are,
-   * the same whichever way it faces. */
+   * turned to point the way each direction faces. */
   async importSprite() {
     if (!this.confirmDiscard('new')) return;
     const picked = await api.importDialog();
@@ -1679,8 +1679,8 @@ class App {
     $('#cameraNote').textContent = {
       generator: 'Each direction drawn as the jeep is: the generator\'s own views.',
       custom: 'Pitch is how far above the horizon the camera looks down; yaw turns the vehicle on top of facing that way; zoom scales it; stretch draws it wider than tall.',
-      single: 'The same picture whichever way it faces. Crayons go on what that view shows.',
-      sprite: 'Its picture as drawn, for all four directions. The 4 dir workspace shows the blocks it is pressed into, to reshape them.',
+      single: 'One picture, turned a quarter at a time to point the way each direction faces. Crayons go on what that view shows.',
+      sprite: 'Its picture as drawn, turned to point the way each direction faces. The 4 dir workspace shows the blocks it is pressed into, to reshape them.',
     }[mode];
     if (mode !== 'custom') return;
     this.cameraDefaults ||= (await api.call('camera_defaults').catch(() => ({ dirs: {} }))).dirs;

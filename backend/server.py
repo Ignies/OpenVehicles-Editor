@@ -364,7 +364,7 @@ class Server:
 
     def rpc_import_sprite(self, files, nose="N", name="vehicle"):
         """A new project from a finished sprite, an Aseprite file or PNGs (sprite.build): each layer
-        named for the part it is, one top-down picture for all four directions."""
+        named for the part it is, one top-down picture, turned to each direction."""
         import sprite as S
         p, warnings = S.build(files, nose, name, self.gen.materials)
         return {"box": p["box"], "layers": p["layers"], "materials": self.gen.materials, "vehicle": p["vehicle"],

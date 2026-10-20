@@ -880,8 +880,9 @@ def _write(gen, project, repo, progress=None, out=None):
                         f"    wheelOverlayLayers: {flow(['wheels'] + list(wheel_kit_ids))}\n")
     # Without lamps the list is still written, empty: the game won't take it null.
     lamps_block = "\n" + lamp_yaml if lamp_yaml else " []\n"
-    # Drawn the same whichever way it faces: crayons go on the one view, at every heading.
-    fixed = f"    fixedDirection: {DIRECTION[gen.camera.view]}\n" if gen.camera.one else ""
+    # Drawn from one of the generator's views, turned to each heading: the panel faces it shows face
+    # on are that view's at every heading. A sprite seen from above shows only top faces.
+    fixed = f"    fixedDirection: {DIRECTION[gen.camera.view]}\n" if gen.camera.mode == "single" else ""
     front = f"  - type: CMUVehicleFrontDamage\n    frontVoxel: {front_voxel}\n"
     if hood:
         front += f"    closedHoodState: {hood}_closed_dent\n" + (f"    closedPanel: {hood}\n" if hood != "hood" else "")

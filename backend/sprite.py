@@ -1,5 +1,5 @@
-"""A vehicle drawn as a finished sprite, in Aseprite or as PNGs: one top-down picture used for all
-four directions, its layers named for what they are.
+"""A vehicle drawn as a finished sprite, in Aseprite or as PNGs: one top-down picture, turned to point
+the way each direction faces, its layers named for what they are.
 
     base, overlay                 the body, under and over the riders (overlay is optional)
     damaged, damaged_overlay      the body worn (optional; without it the generator's scorches)
@@ -465,7 +465,7 @@ def recolour(states, project, ids, role, g, mask_alpha):
     # The crayon map's over-the-riders mark, by the overlay.
     if "crayon_map" in states:
         surface = {}
-        for p, (r_, g_, b_, a) in states["crayon_map"]["frames"]["S"][0].items():
+        for p, (r_, g_, b_, a) in states["crayon_map"]["frames"][sprite.get("nose", "N")][0].items():
             panel = (128 if a <= 128 else 255) - a
             surface[p] = (r_, g_, b_, (128 if p in over else 255) - panel)
         put("crayon_map", [surface])

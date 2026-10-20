@@ -218,7 +218,7 @@
    * points in the picture and its name. Null if cancelled. */
   function importDialog() {
     return modal(async (box, close) => {
-      box.innerHTML = '<header><b>Import a sprite</b><span>One picture, for all four directions</span></header>'
+      box.innerHTML = '<header><b>Import a sprite</b><span>One picture, turned to each direction</span></header>'
         + '<div class="import-body">'
         + '<button class="btn" data-pick>Choose an Aseprite file or PNGs…</button><p class="note" data-files>Nothing chosen.</p>'
         + '<p class="note">Layers by name: <b>base</b>, <b>overlay</b> (over the riders), and if drawn <b>wreck</b>, <b>damaged</b>, '
