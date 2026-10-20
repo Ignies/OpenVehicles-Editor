@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>CMU Open Vehicles</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="titlebar">
+    <div class="brand">
+      <button class="glyph-btn" id="glyph" data-tip="CMU"><img class="glyph" src="cmu.png" alt=""></button>
+      <span class="name">Open Vehicles</span>
+      <span class="sep">/</span>
+      <span class="doc" id="docName">untitled</span>
+      <span class="dirty" id="docDirty" title="Unsaved changes"></span>
+    </div>
+    <div class="title-actions">
+      <div class="add-wrap new-wrap"><button class="ghost" id="newBtn" data-tip="New vehicle: blank or from a template">New</button>
+        <div class="menu new-menu" id="newMenu"></div></div>
+      <button class="ghost" data-action="open" data-tip="Open a drawing (Ctrl+O)">Open</button>
+      <button class="ghost" data-action="save" data-tip="Save (Ctrl+S)">Save</button>
+      <button class="ghost" data-action="export" data-tip="Export the four sprites and the voxels">Export</button>
+    </div>
+    <div class="window-controls">
+      <button class="wc" data-win="minimize" aria-label="Minimize"><i data-icon="minimize"></i></button>
+      <button class="wc" data-win="maximize" aria-label="Maximize"><i data-icon="maximize"></i></button>
+      <button class="wc close" data-win="close" aria-label="Close"><i data-icon="close"></i></button>
+    </div>
+  </header>
+
+  <nav class="rail" id="rail">
+    <span class="rail-indicator" id="railIndicator"></span>
+    <button class="tool" data-tool="pencil" data-tip="Pencil  B"><i data-icon="pencil"></i></button>
+    <button class="tool" data-tool="eraser" data-tip="Eraser  E"><i data-icon="eraser"></i></button>
+    <button class="tool" data-tool="fill" data-tip="Fill  G"><i data-icon="fill"></i></button>
+    <button class="tool" data-tool="line" data-tip="Line  L"><i data-icon="line"></i></button>
+    <button class="tool" data-tool="rect" data-tip="Rectangle  R"><i data-icon="rect"></i></button>
+    <button class="tool" data-tool="ellipse" data-tip="Ellipse  O"><i data-icon="ellipse"></i></button>
+    <button class="tool" data-tool="depth" data-tip="Depth brush  D: sets how deep a surface sits, keeps its colour"><i data-icon="depth"></i></button>
+    <button class="tool" data-tool="picker" data-tip="Pick colour and depth  I"><i data-icon="picker"></i></button>
+    <span class="rail-gap"></span>
+    <button class="toggle-tool" id="mirrorToggle" data-tip="Mirror left and right  M"><i data-icon="mirror"></i></button>
+    <button class="toggle-tool" id="depthViewToggle" data-tip="Show depth  V"><i data-icon="depthview"></i></button>
+    <button class="toggle-tool on" id="ghostToggle" data-tip="Show the other layers faintly  H"><i data-icon="ghost"></i></button>
+    <span class="rail-gap"></span>
+    <button class="rail-btn" data-action="undo" data-tip="Undo  Ctrl+Z"><i data-icon="undo"></i></button>
+    <button class="rail-btn" data-action="redo" data-tip="Redo  Ctrl+Y"><i data-icon="redo"></i></button>
+  </nav>
+
+  <main class="board" id="board">
+    <div class="damage-banner" id="damageBanner"><i data-icon="crack"></i><span id="damageBannerText"></span><button class="mini" id="damageDone">Done  Esc</button></div>
+    <section class="view" data-view="side">
+      <header><span class="label">Side</span><span class="hint">from the right · nose right</span><span class="dims"></span>
+        <span class="slice" data-tip="Slice: draw one layer of voxels at a time  , ."><button class="slice-btn" aria-label="Slice"><i data-icon="slice"></i></button><button class="slice-step" data-step="-1" aria-label="Nearer">&lsaquo;</button><output class="slice-out"></output><button class="slice-step" data-step="1" aria-label="Deeper">&rsaquo;</button></span>
+        <button class="mini" data-clear="side" data-tip="Clear this view">Clear</button></header>
+      <div class="stage"><canvas class="paint"></canvas><canvas class="overlay"></canvas></div>
+    </section>
+    <section class="view" data-view="left">
+      <header><span class="label">Left</span><span class="hint">from the left · nose left</span><span class="dims"></span>
+        <span class="slice" data-tip="Slice: draw one layer of voxels at a time  , ."><button class="slice-btn" aria-label="Slice"><i data-icon="slice"></i></button><button class="slice-step" data-step="-1" aria-label="Nearer">&lsaquo;</button><output class="slice-out"></output><button class="slice-step" data-step="1" aria-label="Deeper">&rsaquo;</button></span>
+        <button class="mini" data-clear="left" data-tip="Clear this view: a layer on both sides mirrors its right again">Clear</button></header>
+      <div class="stage"><canvas class="paint"></canvas><canvas class="overlay"></canvas></div>
+    </section>
+    <section class="view" data-view="front">
+      <header><span class="label">Front</span><span class="hint">from ahead</span><span class="dims"></span>
+        <span class="slice" data-tip="Slice: draw one layer of voxels at a time  , ."><button class="slice-btn" aria-label="Slice"><i data-icon="slice"></i></button><button class="slice-step" data-step="-1" aria-label="Nearer">&lsaquo;</button><output class="slice-out"></output><button class="slice-step" data-step="1" aria-label="Deeper">&rsaquo;</button></span>
+        <button class="mini" data-clear="front" data-tip="Clear this view">Clear</button></header>
+      <div class="stage"><canvas class="paint"></canvas><canvas class="overlay"></canvas></div>
+    </section>
+    <section class="view" data-view="top">
+      <header><span class="label">Top</span><span class="hint">from above · nose right</span><span class="dims"></span>
+        <span class="slice" data-tip="Slice: draw one layer of voxels at a time  , ."><button class="slice-btn" aria-label="Slice"><i data-icon="slice"></i></button><button class="slice-step" data-step="-1" aria-label="Nearer">&lsaquo;</button><output class="slice-out"></output><button class="slice-step" data-step="1" aria-label="Deeper">&rsaquo;</button></span>
+        <button class="mini" data-clear="top" data-tip="Clear this view">Clear</button></header>
+      <div class="stage"><canvas class="paint"></canvas><canvas class="overlay"></canvas></div>
+    </section>
+    <section class="view" data-view="back">
+      <header><span class="label">Back</span><span class="hint">from behind · optional</span><span class="dims"></span>
+        <span class="slice" data-tip="Slice: draw one layer of voxels at a time  , ."><button class="slice-btn" aria-label="Slice"><i data-icon="slice"></i></button><button class="slice-step" data-step="-1" aria-label="Nearer">&lsaquo;</button><output class="slice-out"></output><button class="slice-step" data-step="1" aria-label="Deeper">&rsaquo;</button></span>
+        <button class="mini" data-clear="back" data-tip="Clear this view">Clear</button></header>
+      <div class="stage"><canvas class="paint"></canvas><canvas class="overlay"></canvas></div>
+    </section>
+    <section class="depth-panel" id="depthPanel" data-view="depth">
+      <header><span class="label">Depth</span><span class="depth-hint"></span>
+        <span class="depth-tools">
+          <button class="mini icon" data-depth="pull" data-tip="Copy the nearer slice into this one  &lt;"><i data-icon="pull"></i></button>
+          <button class="mini icon" data-depth="carry" data-tip="Carry this slice into the next and go there  &gt;"><i data-icon="carry"></i></button>
+          <button class="toggle-mini" id="onionToggle" data-depth="onion" data-tip="Onion skin: the nearer slice warm, the deeper cool  K"><i data-icon="onion"></i></button>
+          <button class="mini" data-depth="whole" data-tip="Show the layer whole again">Whole</button>
+        </span></header>
+      <div class="cut-stage"><canvas class="cut"></canvas>
+        <div class="carved-note"><p>Only voxels have an inside to slice.</p><button class="btn primary" data-depth="bake"><i data-icon="slice"></i>Make voxels</button></div>
+      </div>
+      <div class="ruler-stage"><canvas class="ruler"></canvas></div>
+      <div class="peek"><canvas></canvas><span></span></div>
+    </section>
+  </main>
+
+  <aside class="side">
+    <nav class="tabs" id="tabs" role="tablist" aria-orientation="vertical">
+      <span class="tab-indicator" id="tabIndicator"></span>
+      <button class="tab" role="tab" data-tab="layers" data-tip="Layers and damage states  Ctrl+1"><span>Layers</span></button>
+      <button class="tab" role="tab" data-tab="draw" data-tip="Materials and brush  Ctrl+2"><span>Draw</span></button>
+      <button class="tab" role="tab" data-tab="paint" data-tip="Paint and dirt  Ctrl+3"><span>Paint</span></button>
+      <button class="tab" role="tab" data-tab="vehicle" data-tip="Vehicle and its shape  Ctrl+4"><span>Vehicle</span></button>
+      <button class="tab" role="tab" data-tab="generate" data-tip="Generate the art  Ctrl+5"><span>Generate</span></button>
+    </nav>
+
+    <div class="side-main">
+      <section class="card preview-card">
+        <div class="preview-stage" id="previewStage">
+          <canvas id="previewCanvas"></canvas>
+          <div class="preview-busy" id="previewBusy"><span></span></div>
+          <div class="preview-dir" id="previewDir">S</div>
+          <div class="damage-chip" id="damageChip"></div>
+          <div class="part-label" id="partLabel"></div>
+          <div class="open-chip" id="openChip"></div>
+        </div>
+        <div class="thumbs" id="thumbs">
+          <button class="thumb" data-dir="S" data-tip="Drive south"><canvas></canvas><span>S</span></button>
+          <button class="thumb" data-dir="E" data-tip="Drive east"><canvas></canvas><span>E</span></button>
+          <button class="thumb" data-dir="N" data-tip="Drive north"><canvas></canvas><span>N</span></button>
+          <button class="thumb" data-dir="W" data-tip="Drive west"><canvas></canvas><span>W</span></button>
+        </div>
+        <div class="preview-controls">
+          <button class="icon-btn" id="playToggle" data-tip="Drive or park  Space"><i data-icon="pause"></i></button>
+          <div class="segmented small" id="speedSeg">
+            <button data-value="1.2">Slow</button><button data-value="2.6" class="on">Cruise</button><button data-value="4.5">Fast</button>
+          </div>
+          <div class="bgs" id="bgSwatches" data-tip="Ground">
+            <button data-bg="dark" class="on"></button><button data-bg="checker"></button><button data-bg="grass"></button><button data-bg="sand"></button><button data-bg="concrete"></button>
+          </div>
+          <button class="icon-btn" id="damageToggle" data-tip="Show each part's last damage state  X"><i data-icon="crack"></i></button>
+          <button class="icon-btn" id="paintToggle" data-tip="Paint voxels on the preview (or Alt+click it)"><i data-icon="brush"></i></button>
+          <button class="icon-btn" id="frameToggle" data-tip="Show the 96 px sprite frame"><i data-icon="frame"></i></button>
+        </div>
+      </section>
+
+      <div class="panels" id="panels">
+        <div class="tab-panel" role="tabpanel" data-panel="layers">
+          <section class="card layers-card">
+            <header class="card-head"><span>Layers</span>
+              <div class="add-wrap"><button class="mini" id="layerAdd" data-tip="Add a layer">+ Add</button>
+                <div class="menu" id="kindMenu"></div></div></header>
+            <div class="layer-list" id="layerList"></div>
+            <div class="layer-props">
+              <label class="field"><span>Kind</span><div class="select-wrap"><select id="layerKind"></select></div></label>
+              <label class="field"><span>Side</span>
+                <div class="segmented" id="sidesSeg"><button data-value="left">Left</button><button data-value="both">Both</button><button data-value="right">Right</button></div></label>
+              <label class="field" id="thickField"><span>Thick</span>
+                <div class="slider"><input type="range" id="thickRange" min="0" max="12" value="0"><output id="thickOut">full</output></div></label>
+              <label class="field" data-tip="Swings with that layer when it opens, like kit hung on a door or tailgate"><span>Rides on</span>
+                <div class="select-wrap"><select id="layerRides"></select></div></label>
+              <label class="field" id="hingeField" data-tip="The edge it swings on; Auto is its kind's own"><span>Hinge</span>
+                <div class="segmented" id="hingeSeg"><button data-value="auto">Auto</button><button data-value="front">Front</button><button data-value="back">Back</button><button data-value="top">Top</button><button data-value="bottom">Bottom</button></div></label>
+              <label class="field" id="openField" data-tip="How far it opens"><span>Opens</span>
+                <div class="slider"><input type="range" id="openRange" min="0" max="120" step="5" value="0"><output id="openOut">auto</output></div></label>
+              <label class="field" id="kitField" data-tip="In the game, a slot this item fits: taken off and put back by hand"><span>Kit</span>
+                <div class="select-wrap"><select id="layerKit"></select></div></label>
+              <label class="field" id="modelField"><span>Model</span>
+                <div class="segmented" id="modelSeg"><button data-value="generator" data-tip="The generator's model, with what you draw applied over it">Generator</button><button data-value="drawing" data-tip="Carved from its views alone">Drawing</button><button data-value="voxels" data-tip="Voxels of its own: holds what views can't, drawn along each line of sight">Voxels</button></div></label>
+            </div>
+          </section>
+
+          <section class="card damage-card">
+            <header class="card-head"><span id="damageTitle">Damage states</span>
+              <div class="add-wrap"><button class="mini" id="damageAdd" data-tip="Add a damage state to this layer">+ Add</button>
+                <div class="menu" id="damageMenu"></div></div></header>
+            <div class="damage-list" id="damageList"></div>
+            <p class="note" id="damageNote">A damage state is how this part looks hurt by one damage type, drawn at levels: 20, 40, 60, 80 and 100 of that damage taken, each its own drawing. The part shows the highest level it has reached. Pick a level to draw it; an empty one starts as a copy of the level below.</p>
+          </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" data-panel="draw">
+          <section class="card materials-card">
+            <header class="card-head"><span>Materials</span><input class="search" id="matSearch" placeholder="Search" spellcheck="false"></header>
+            <div class="swatches" id="swatches"></div>
+            <div class="new-mat" id="newMat"><input type="color" id="newMatColor" value="#8a5a3c"><input type="text" id="newMatName" placeholder="New material name" spellcheck="false"><button class="mini" id="newMatAdd">Add</button></div>
+            <div class="current-mat"><span class="chip" id="matChip"></span><span id="matName">—</span></div>
+          </section>
+
+          <section class="card" id="refCard">
+            <header class="card-head"><span>Trace</span></header>
+            <div class="refs" id="refs"></div>
+            <p class="note">A picture under a view to trace: a blueprint, a photo from the side. It's stretched to the box, so set the box's shape to the picture's first.</p>
+          </section>
+          <section class="card">
+            <header class="card-head"><span>Brush</span></header>
+            <label class="field"><span>Depth</span>
+              <div class="segmented" id="depthModeSeg"><button data-value="auto" class="on">Auto</button><button data-value="fixed">Fixed</button></div></label>
+            <label class="field dim" id="depthField"><span></span>
+              <div class="slider"><input type="range" id="depthRange" min="0" max="36" value="0"><output id="depthOut">0</output></div></label>
+            <label class="field"><span>Size</span>
+              <div class="segmented" id="sizeSeg"><button data-value="1" class="on">1</button><button data-value="2">2</button><button data-value="3">3</button></div></label>
+            <p class="note">Depth is how far in from that view's side a surface sits; 0 is the box's outer edge. Auto keeps the depth of what you paint over, and new pixels take the depth of the surface beside them, so a panel grows as a panel. Fixed puts every pixel at the slider's depth, as the depth brush (D) always does.</p>
+            <label class="field"><span>Extrude</span>
+              <div class="segmented" id="extrudeSeg"><button data-value="off" class="on">Off</button><button data-value="n" id="extrudeN">4 voxels</button><button data-value="through">Through</button></div></label>
+            <label class="field dim" id="extrudeField"><span></span>
+              <div class="slider"><input type="range" id="extrudeRange" min="1" max="24" value="4"><output id="extrudeOut">4</output></div></label>
+            <label class="field"><span>Erase</span>
+              <div class="segmented" id="eraseSeg"><button data-value="through" class="on">Through</button><button data-value="surface">Surface</button></div></label>
+            <p class="note">On a voxel layer every pixel is drawn along its line of sight. Extrude fills that many voxels in from its depth, or through to the far side, instead of a surface; the eraser cuts through it all or takes off only the surface. Slice a view (its slice button, or , and .) to draw one layer of voxels at a time.</p>
+          </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" data-panel="paint">
+          <section class="card">
+            <header class="card-head"><span>Paint</span><button class="mini" id="paintReset">Factory</button></header>
+            <div class="paint-row">
+              <label class="color"><input type="color" id="paintBody" value="#767e50"><span>Body</span></label>
+              <label class="color"><input type="color" id="paintInterior" value="#767e50"><span>Tub</span></label>
+              <label class="color"><input type="color" id="paintSeats" value="#767e50"><span>Seats</span></label>
+            </div>
+            <div class="presets" id="presets"></div>
+            <label class="field"><span>Dirt</span>
+              <div class="slider"><input type="range" id="dirtRange" min="0" max="100" value="0"><output id="dirtOut">0</output></div></label>
+          </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" data-panel="vehicle">
+          <section class="card" id="wheelsCard">
+            <header class="card-head"><span>Wheels</span></header>
+            <div class="stats">
+              <label class="stat" data-tip="Where each axle sits along it (f), comma separated"><span>Axles</span><input type="text" id="wheelAxles" placeholder="-20, 20"></label>
+              <label class="stat"><span>Radius</span><input type="number" id="wheelRadius" min="3" max="20" value="8"></label>
+              <label class="stat" data-tip="From the left wheels' centre to the right's"><span>Track</span><input type="number" id="wheelTrack" min="6" max="60" value="30"></label>
+              <label class="stat"><span>Tyre width</span><input type="number" id="wheelWidth" min="2" max="14" value="5"></label>
+            </div>
+            <button class="btn" id="wheelsBtn"><i data-icon="redo"></i>Build the wheels</button>
+            <p class="note">Builds the Wheels layer, or rebuilds it: a pair of round tyres with rims on each axle. They turn when it drives.</p>
+          </section>
+          <section class="card">
+            <header class="card-head"><span>Shape</span></header>
+            <div class="box-dims">
+              <label><span>L</span><input type="number" id="boxL" min="8" max="160"></label>
+              <label><span>W</span><input type="number" id="boxW" min="8" max="120"></label>
+              <label><span>H</span><input type="number" id="boxH" min="8" max="96"></label>
+            </div>
+            <div class="segmented wide" id="resizeSeg">
+              <button data-value="keep" class="on">Keep the drawing</button><button data-value="stretch">Stretch it</button>
+            </div>
+            <button class="btn" data-action="resize"><i data-icon="frame"></i>Apply</button>
+            <p class="note">Keep grows or trims the box around the drawing. Stretch scales every layer and damage state with the box, for a longer, wider or taller vehicle.</p>
+          </section>
+          <section class="card" id="drivingCard">
+            <header class="card-head"><span>Driving</span><button class="mini" id="drivingReset" data-tip="Back to the jeep's">Jeep's</button></header>
+            <div class="stats" id="stats"></div>
+            <div class="seats-head"><span>Sounds</span></div>
+            <div class="sounds" id="sounds"></div>
+            <datalist id="soundList"></datalist>
+          </section>
+          <section class="card" id="gameCard">
+            <header class="card-head"><span>In the game</span></header>
+            <label class="field"><span>Id</span><div class="prefixed"><em>CMUVehicle</em><input type="text" id="vehId" spellcheck="false" placeholder="Roadster"></div></label>
+            <label class="field"><span>Name</span><input type="text" id="vehName" spellcheck="false" placeholder="roadster"></label>
+            <label class="field top"><span>About</span><textarea id="vehDesc" rows="2" placeholder="What players read when they examine it."></textarea></label>
+            <div class="seats-head"><span>Seats</span><button class="mini" id="addSeat">Add seat</button></div>
+            <div class="seats" id="seats"></div>
+            <p class="note">Place a seat, then click where its rider sits on the Top view (or the Side or Left view for its height). A door opens to let its rider in and out.</p>
+            <div class="gen-path" id="gameRepo" data-tip="The game repo it's written into"></div>
+            <div class="checks" id="checks"></div>
+            <button class="btn primary progress" id="gameBtn"><span class="fill"></span><span class="txt"><i data-icon="write"></i><b>Write into the game</b></span></button>
+            <div class="row">
+              <button class="btn subtle" id="testBtn" data-tip="Write it, start the test game if it isn't running, and spawn it beside you"><i data-icon="play"></i>Test in game</button>
+              <button class="btn subtle icon-only" id="respawnBtn" data-tip="Spawn it again beside you" disabled><i data-icon="redo"></i></button>
+              <button class="btn subtle icon-only" id="stopGameBtn" data-tip="Close the test game" disabled><i data-icon="close"></i></button>
+            </div>
+            <div class="row">
+              <button class="btn subtle" id="lintBtn" data-tip="Run the repo's YAML linter on what's written (a few minutes)"><i data-icon="check"></i>Lint</button>
+              <button class="btn subtle" id="commitBtn" data-tip="Commit the files written, and only them" disabled><i data-icon="stage"></i>Commit</button>
+            </div>
+            <div class="game-status" id="gameStatus"><span class="dot"></span><span class="txt">Test game not running</span></div>
+            <div class="written" id="written"></div>
+          </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" data-panel="generate">
+          <section class="card">
+            <header class="card-head"><span>Generate</span></header>
+            <div class="gen-path" id="genPath" data-tip="Change the generator script"></div>
+            <button class="btn primary progress" id="generateBtn"><span class="fill"></span><span class="txt"><i data-icon="spark"></i><b>Generate art</b></span></button>
+            <div class="row">
+              <button class="btn subtle" data-action="open-textures"><i data-icon="folder"></i>Textures</button>
+              <button class="btn subtle" data-action="open-previews"><i data-icon="folder"></i>Previews</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <footer class="statusbar">
+    <span class="dot" id="backendDot"></span><span id="backendText">Starting Python…</span>
+    <span class="sb-sep"></span><span id="coords">—</span>
+    <span class="sb-sep"></span><span id="voxelCount">0 voxels</span>
+    <span class="sb-sep"></span><span id="renderMs">—</span>
+    <span class="grow"></span><span id="watchText"></span>
+  </footer>
+</div>
+<div class="toasts" id="toasts"></div>
+<div class="tip" id="tip"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
